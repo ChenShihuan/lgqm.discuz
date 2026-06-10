@@ -1,0 +1,31 @@
+# lgqm.discuz - 临高启明论坛同人监控与Wiki同步
+# Gitignore
+
+lgqmtr/
+
+# 运行时数据
+data/*.json
+!data/.gitkeep
+
+# 下载的HTML页面
+html/
+
+# 下载的图片
+img/
+
+# 生成的输出文件
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# 环境变量
+.env
+data/local.json
+
+# IDE
+.vscode/
+.idea/
