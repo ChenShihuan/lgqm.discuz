@@ -61,6 +61,7 @@ class DiffItem:
     wiki_article: Optional[WikiArticle] = None
     confidence: float = 1.0     # 匹配置信度
     reason: str = ""            # 差异原因
+    verified: Optional[bool] = None  # None=未验证, True=可访问, False=不可访问
 
 
 @dataclass
@@ -73,6 +74,8 @@ class DiffReport:
         "new_threads": 0,
         "updated_threads": 0,
         "possible_matches": 0,
+        "verified_accessible": 0,
+        "verified_inaccessible": 0,
     })
     new_items: List[DiffItem] = field(default_factory=list)
     updated_items: List[DiffItem] = field(default_factory=list)
@@ -85,12 +88,51 @@ class DiffReport:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(asdict(self), f, ensure_ascii=False, indent=2)
 
+    def _item_from_dict(self, item_data: dict) -> DiffItem:
+        """从字典重建 DiffItem"""
+        ft = item_data.get("forum_thread", {})
+        wa = item_data.get("wiki_article")
+        return DiffItem(
+            type=item_data.get("type", ""),
+            forum_thread=ForumThread(
+                tid=ft.get("tid", 0),
+                title=ft.get("title", ""),
+                author=ft.get("author", ""),
+                author_uid=ft.get("author_uid", 0),
+                url=ft.get("url", ""),
+                post_date=ft.get("post_date"),
+                last_reply_date=ft.get("last_reply_date"),
+                reply_count=ft.get("reply_count", 0),
+                view_count=ft.get("view_count", 0),
+                is_sticky=ft.get("is_sticky", False),
+            ),
+            wiki_article=WikiArticle(
+                filename=wa.get("filename", ""),
+                title=wa.get("title", ""),
+                forum_url=wa.get("forum_url", ""),
+                forum_tid=wa.get("forum_tid"),
+                first_publish=wa.get("first_publish", ""),
+                last_update=wa.get("last_update", ""),
+                is_completed=wa.get("is_completed", ""),
+                author=wa.get("author", ""),
+            ) if wa else None,
+            confidence=item_data.get("confidence", 1.0),
+            reason=item_data.get("reason", ""),
+            verified=item_data.get("verified"),
+        )
+
     @classmethod
     def from_json(cls, filepath: str) -> "DiffReport":
-        """从 JSON 文件加载"""
+        """从 JSON 文件完整加载报告（含所有差异项）"""
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
         report = cls()
         report.scan_time = data.get("scan_time", "")
         report.summary = data.get("summary", report.summary)
+        for item_data in data.get("new_items", []):
+            report.new_items.append(report._item_from_dict(item_data))
+        for item_data in data.get("updated_items", []):
+            report.updated_items.append(report._item_from_dict(item_data))
+        for item_data in data.get("possible_matches", []):
+            report.possible_matches.append(report._item_from_dict(item_data))
         return report

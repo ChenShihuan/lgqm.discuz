@@ -1,3 +1,8 @@
+---
+name: update-article
+description: 对 Wiki 已收录的同人文章，从论坛拉取最新内容更新 .mw 文件
+---
+
 # Update Article — 更新已有 Wiki 文章
 
 ## 描述
@@ -13,32 +18,31 @@
 
 ## 执行流程
 
-### Step 1: 确定目标文章
+### Step 1: 更新 Wiki 文章
 
-通过 TID 在 wiki_index.json 中找到对应的 Wiki 文章，确认其存在并查看当前状态。
+```bash
+python3 -m monitor.cli update <TID>
+```
 
-### Step 2: 读取现有 Wiki 文章
-
-读取 .mw 文件，提取 Infobox 头部（保留所有手动填写字段）。
-
-### Step 3: 拉取最新内容
-
-使用 fetcher.py 的 Archiver 模式拉取全帖最新内容。
-
-### Step 4: 生成更新版
-
-使用 converter.py 的 `update_existing_wiki()` 函数：
-- 保留原有 Infobox（图像、地点、关键字等）
-- 自动更新「最近更新」日期
-- 正文替换为最新论坛内容
-
-### Step 5: 展示差异
+### Step 2: 展示差异
 
 对比新旧 .mw 文件，展示差异供用户审阅。
 
-### Step 6: 确认提交
+### Step 3: 确认并复制到 Wiki 仓库
 
-用户确认后，将更新文件覆盖到 Wiki 仓库并 `git commit`。
+```bash
+# 找到生成的更新文件
+NEW_FILE=$(ls -t output/*-updated.mw | head -1)
+echo "更新文件: $NEW_FILE"
+
+# 覆盖到 Wiki 仓库（需确认）
+cp "$NEW_FILE" lgqm.huijiwiki.com/"${NEW_FILE##*/%-updated.mw}".mw
+
+# 提交
+cd lgqm.huijiwiki.com
+git add *.mw
+git commit -m "更新同人: $(basename "$NEW_FILE" .mw | sed 's/-updated$//')"
+```
 
 ## 注意事项
 

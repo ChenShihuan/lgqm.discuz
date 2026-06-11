@@ -1,6 +1,7 @@
 """
 差异对比引擎 - 对比论坛帖子列表与 Wiki 文章索引，发现新帖和更新
 """
+import requests
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -97,6 +98,139 @@ def detect_diffs(
     return report
 
 
+def verify_tid(tid: int, timeout: int = 10, use_auth: bool = True) -> bool:
+    """
+    通过 Archiver 验证 TID 是否可访问。
+    公开板块用 Archiver 即可；非公开板块需要用 thread URL + cookie 验证。
+
+    Args:
+        tid: 帖子ID
+        timeout: 请求超时秒数
+        use_auth: Archiver 不可达时是否尝试 cookie 认证访问
+
+    Returns:
+        True 可访问, False 不可访问
+    """
+    from .auth import get_cookie
+
+    # 优先尝试 Archiver（公开板块，无需 cookie）
+    archiver_url = f"https://lgqmonline.top/archiver/?tid-{tid}.html"
+    try:
+        resp = requests.get(
+            archiver_url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=timeout,
+            allow_redirects=True,
+        )
+        if resp.status_code == 200:
+            if 'class="author"' in resp.text or "class='author'" in resp.text:
+                return True
+    except Exception:
+        pass
+
+    # Archiver 不可达，尝试用 cookie 访问 thread 页面（非公开板块）
+    if use_auth:
+        thread_url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        }
+        cookie = get_cookie()
+        if cookie:
+            headers["Cookie"] = cookie
+        try:
+            resp = requests.get(
+                thread_url,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=True,
+            )
+            if resp.status_code == 200:
+                # 有作者信息或有帖子内容 → 可访问
+                if ('class="author"' in resp.text or "class='author'" in resp.text or
+                        'class="authi"' in resp.text or 'class="pi"' in resp.text):
+                    return True
+                # 是"提示信息"页面且无帖子内容 → 不可访问
+                if "提示信息" in resp.text or "未定义操作" in resp.text:
+                    return False
+                # 非提示信息页面（可能是板块列表重定向等）→ 也算可访问
+                if "提示信息" not in resp.text:
+                    return True
+        except Exception:
+            pass
+
+    return False
+
+
+def verify_possible_matches(report: DiffReport, verbose: bool = False) -> DiffReport:
+    """
+    对 possible_matches 中的每个 TID 验证可访问性。
+    先通过公开 Archiver，不可达时用 cookie 尝试 thread URL。
+
+    分类：
+    - 公开可访问 → verified=True, 纳入追踪
+    - 需登录可访问 → verified=True, reason 中注明"非公开板块"
+    - 不可访问 → verified=False, 标记为疑似失效
+    """
+    from .auth import get_cookie
+
+    accessible_public = 0
+    accessible_auth = 0
+    inaccessible = 0
+    has_auth = bool(get_cookie())
+
+    for item in report.possible_matches:
+        tid = item.wiki_article.forum_tid if item.wiki_article else item.forum_thread.tid
+        if tid is None:
+            item.verified = False
+            inaccessible += 1
+            continue
+
+        # 先尝试公开 Archiver
+        ok = verify_tid(tid, use_auth=False)
+        if ok:
+            item.verified = True
+            accessible_public += 1
+            item.reason = f"可访问：TID={tid} 可通过公开 Archiver 访问"
+        elif has_auth:
+            # 公开不可达，用 cookie 尝试
+            ok_auth = verify_tid(tid, use_auth=True)
+            if ok_auth:
+                item.verified = True
+                accessible_auth += 1
+                item.reason = f"可访问：TID={tid} 位于非公开板块，需登录后访问"
+            else:
+                item.verified = False
+                inaccessible += 1
+                item.reason = f"不可访问：TID={tid} 无法访问（可能已删除）"
+        else:
+            item.verified = False
+            inaccessible += 1
+            item.reason = f"不可访问：TID={tid} 无法通过公开 Archiver 访问（未配置 cookie，可能位于非公开板块）"
+
+        if verbose:
+            if item.verified:
+                tag = "🔒" if accessible_auth > 0 and item.reason.startswith("可访问：") and "非公开" in item.reason else "✅"
+            else:
+                tag = "❌"
+            log(f"  {tag} TID={tid:>5} {item.wiki_article.title[:40] if item.wiki_article else ''}", "INFO")
+
+    report.summary["verified_accessible"] = accessible_public + accessible_auth
+    report.summary["verified_accessible_public"] = accessible_public
+    report.summary["verified_accessible_auth"] = accessible_auth
+    report.summary["verified_inaccessible"] = inaccessible
+
+    if verbose:
+        parts = [f"公开 {accessible_public}"]
+        if accessible_auth:
+            parts.append(f"需登录 {accessible_auth}")
+        parts.append(f"不可访问 {inaccessible}")
+        log(f"验证完成：{', '.join(parts)}", "SUCCESS")
+
+    return report
+
+
 def _check_update(thread: ForumThread, article: WikiArticle) -> Optional[str]:
     """
     检查一篇 Wiki 已收录的文章是否需要更新
@@ -138,7 +272,10 @@ def format_report_summary(report: DiffReport) -> str:
     lines.append("")
     lines.append(f"  🆕 新帖（待导入）: {report.summary['new_threads']}")
     lines.append(f"  📝 更新帖（有新增内容）: {report.summary['updated_threads']}")
-    lines.append(f"  ❓ 疑似匹配: {report.summary['possible_matches']}")
+    lines.append(f"  ❓ 疑似匹配: {report.summary['possible_matches']}"
+                 f" (公开 {report.summary.get('verified_accessible_public', 0)},"
+                 f" 需登录 {report.summary.get('verified_accessible_auth', 0)},"
+                 f" 不可访问 {report.summary.get('verified_inaccessible', 0)})")
     lines.append("")
 
     if report.new_items:
@@ -162,13 +299,49 @@ def format_report_summary(report: DiffReport) -> str:
             lines.append(f"      Wiki: {wiki_name} | 论坛更新: {t.last_reply_date}")
 
     if report.possible_matches:
-        lines.append("─" * 60)
-        lines.append(f"  ❓ 疑似匹配 ({len(report.possible_matches)} 条)")
-        lines.append("─" * 60)
-        for i, item in enumerate(report.possible_matches, 1):
-            w = item.wiki_article
-            lines.append(f"  {i:>2}. [{w.forum_tid}] {w.title[:50]} (Wiki)")
-            lines.append(f"      论坛链接: {w.forum_url[:60]}")
+        # 分组：公开可访问 / 需登录可访问 / 不可访问 / 未验证
+        verified_public = [item for item in report.possible_matches
+                          if item.verified is True and "非公开" not in item.reason]
+        verified_auth = [item for item in report.possible_matches
+                        if item.verified is True and "非公开" in item.reason]
+        verified_fail = [item for item in report.possible_matches if item.verified is False]
+        unverified = [item for item in report.possible_matches if item.verified is None]
+
+        if verified_public:
+            lines.append("─" * 60)
+            lines.append(f"  ✅ 公开可访问 ({len(verified_public)} 条) — 在其他板块，可纳入追踪")
+            lines.append("─" * 60)
+            for i, item in enumerate(verified_public, 1):
+                w = item.wiki_article
+                lines.append(f"  {i:>2}. [{w.forum_tid}] {w.title[:45]}")
+                lines.append(f"      {w.forum_url[:70]}")
+
+        if verified_auth:
+            lines.append("─" * 60)
+            lines.append(f"  🔒 需登录可访问 ({len(verified_auth)} 条) — 位于非公开板块")
+            lines.append("─" * 60)
+            for i, item in enumerate(verified_auth, 1):
+                w = item.wiki_article
+                lines.append(f"  {i:>2}. [{w.forum_tid}] {w.title[:45]}")
+                lines.append(f"      {w.forum_url[:70]}")
+
+        if verified_fail:
+            lines.append("─" * 60)
+            lines.append(f"  ❌ 不可访问 ({len(verified_fail)} 条) — 可能已删除")
+            lines.append("─" * 60)
+            for i, item in enumerate(verified_fail, 1):
+                w = item.wiki_article
+                lines.append(f"  {i:>2}. [{w.forum_tid}] {w.title[:45]}")
+                lines.append(f"      {w.forum_url[:70]}")
+
+        if unverified:
+            lines.append("─" * 60)
+            lines.append(f"  ❓ 未验证 ({len(unverified)} 条)")
+            lines.append("─" * 60)
+            for i, item in enumerate(unverified, 1):
+                w = item.wiki_article
+                lines.append(f"  {i:>2}. [{w.forum_tid}] {w.title[:45]} (Wiki)")
+                lines.append(f"      论坛链接: {w.forum_url[:60]}")
 
     lines.append("")
     lines.append("=" * 60)

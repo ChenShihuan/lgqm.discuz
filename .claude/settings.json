@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      {
+        "tool": "Bash",
+        "prompt": "run commands with sudo to edit system files"
+      }
+    ]
+  },
+  "skills": {
+    "monitor-forum": {
+      "path": ".claude/skills/monitor-forum.md",
+      "description": "扫描临高启明论坛同人板块，对比灰机 Wiki 已有文章，发现新帖和更新帖"
+    },
+    "diff-review": {
+      "path": ".claude/skills/diff-review.md",
+      "description": "读取并展示论坛与 Wiki 的差异报告，分类浏览新帖、更新帖和疑似匹配项"
+    },
+    "import-article": {
+      "path": ".claude/skills/import-article.md",
+      "description": "从论坛拉取指定帖子，转换为 MediaWiki 格式，保存到灰机 Wiki 仓库"
+    },
+    "update-article": {
+      "path": ".claude/skills/update-article.md",
+      "description": "对 Wiki 已收录的同人文章，从论坛拉取最新内容更新 .mw 文件"
+    }
+  }
+}

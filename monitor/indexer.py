@@ -114,7 +114,7 @@ def scan_wiki_articles(repo_path: str = None, verbose: bool = False) -> List[Wik
     """
     set_verbose(verbose)
     if repo_path is None:
-        repo_path = get("wiki.repo_path", "/mnt/e/code/lgqm.huijiwiki.com")
+        repo_path = get("wiki.repo_path", os.path.join(os.path.dirname(os.path.dirname(__file__)), "lgqm.huijiwiki.com"))
 
     articles: List[WikiArticle] = []
     mw_dir = repo_path

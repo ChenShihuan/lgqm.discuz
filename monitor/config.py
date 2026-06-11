@@ -26,12 +26,12 @@ CONFIG = {
         "archiver_url_template": "https://lgqmonline.top/archiver/?tid-{tid}.html",
         "archiver_page_template": "https://lgqmonline.top/archiver/?tid-{tid}&page={page}.html",
         "cookie": os.environ.get("LGQM_COOKIE", _local.get("cookie", "")),
-        "request_interval": 2.0,  # 请求间隔秒数
+        "request_interval": 0.5,  # 请求间隔秒数
         "request_timeout": 30,
         "max_retries": 3,
     },
     "wiki": {
-        "repo_path": "/mnt/e/code/lgqm.huijiwiki.com",
+        "repo_path": os.path.join(os.path.dirname(os.path.dirname(__file__)), "lgqm.huijiwiki.com"),
         "infobox_template": "Infobox TongRen",
         "forum_link_field": "官坛原帖",
         "last_update_field": "最近更新",
