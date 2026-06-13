@@ -89,6 +89,8 @@ a:hover{text-decoration:underline}
     <option value="-reply_count">回复数 ↓</option>
     <option value="-view_count">查看数 ↓</option>
     <option value="-last_reply_date">最近回复 ↓</option>
+    <option value="-first_publish">首发日期 ↓</option>
+    <option value="-last_update">最近更新 ↓</option>
     <option value="title">标题 A-Z</option>
   </select>
   <select id="catFilter" onchange="render()" style="display:none">
@@ -96,6 +98,11 @@ a:hover{text-decoration:underline}
     <option value="standard">标准同人（原创/短篇）</option>
     <option value="video">视频</option>
     <option value="other">其他帖子</option>
+  </select>
+  <select id="wikiFilter" onchange="render()" style="display:none">
+    <option value="all">全部文章</option>
+    <option value="hasTid">有关联论坛 TID</option>
+    <option value="noTid">未关联论坛</option>
   </select>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none">
     <input type="checkbox" id="showSkipped" onchange="render()"> 显示已跳过
@@ -154,6 +161,9 @@ function items(){
   else if(tab==='wiki'){
     if(!W)return[];
     all=(W.articles||[]).map(a=>({_wiki:true,...a}));
+    const wf=document.getElementById('wikiFilter').value;
+    if(wf==='hasTid')all=all.filter(a=>a.forum_tid);
+    else if(wf==='noTid')all=all.filter(a=>!a.forum_tid);
   }
   // filter skipped
   if(!document.getElementById('showSkipped').checked) all=all.filter(i=>!i.skipped);
@@ -170,7 +180,9 @@ function render(){
   if(s==='-reply_count')it.sort((a,b)=>(b.forum_thread?.reply_count||0)-(a.forum_thread?.reply_count||0));
   else if(s==='-view_count')it.sort((a,b)=>(b.forum_thread?.view_count||0)-(a.forum_thread?.view_count||0));
   else if(s==='-last_reply_date')it.sort((a,b)=>(b.forum_thread?.last_reply_date||'').localeCompare(a.forum_thread?.last_reply_date||''));
-  else if(s==='title')it.sort((a,b)=>(a.forum_thread?.title||'').localeCompare(b.forum_thread?.title||''));
+  else if(s==='-first_publish')it.sort((a,b)=>(b.first_publish||'').localeCompare(a.first_publish||''));
+  else if(s==='-last_update')it.sort((a,b)=>(b.last_update||'').localeCompare(a.last_update||''));
+  else if(s==='title')it.sort((a,b)=>(a.forum_thread?.title||a.title||'').localeCompare(b.forum_thread?.title||b.title||''));
 
   const tp=Math.max(1,Math.ceil(it.length/P));
   if(pg>tp)pg=tp;
@@ -294,7 +306,8 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');tab=t.dataset.tab;pg=1;
   document.getElementById('catFilter').style.display=tab==='new'?'':'none';
-  document.getElementById('catFilter').value='all';
+  document.getElementById('wikiFilter').style.display=tab==='wiki'?'':'none';
+  document.getElementById('catFilter').value='all'; document.getElementById('wikiFilter').value='all';
   document.getElementById('showSkipped').parentElement.style.display=tab==='wiki'?'none':'';
   render();
 }));
