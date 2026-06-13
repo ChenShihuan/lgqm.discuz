@@ -63,6 +63,10 @@ a:hover{text-decoration:underline}
 <header>
   <div><h1>临高启明 同人监控看板</h1><div class="meta" id="scanTime">—</div></div>
   <div class="actions">
+    <span id="queueBadge" style="display:none;background:rgba(255,255,255,.2);padding:4px 12px;border-radius:14px;font-size:13px;margin-right:4px">
+      队列: <b id="queueCount">0</b> 篇
+      <button onclick="clearQueue()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:14px;margin-left:4px;opacity:.7" title="清空队列">✕</button>
+    </span>
     <button class="btn btn-light" onclick="refresh()">刷新数据</button>
     <button class="btn btn-scan" onclick="rescan()" id="btnScan">重新扫描</button>
   </div>
@@ -78,6 +82,7 @@ a:hover{text-decoration:underline}
 
 <div class="toolbar">
   <input type="text" id="q" placeholder="搜索标题 / 作者 / TID..." oninput="render()">
+  <button id="btnBatch" class="btn" style="background:#e8f0fe;color:#1967d2;display:none" onclick="batchQueue()">批量加入队列</button>
   <select id="sort" onchange="render()">
     <option value="">默认排序</option>
     <option value="-reply_count">回复数 ↓</option>
@@ -100,12 +105,21 @@ a:hover{text-decoration:underline}
 <div class="pager" id="pager"></div>
 
 <script>
-let D=null,tab='updated',pg=1,P=50;
+let D=null,tab='updated',pg=1,P=50,QT={};  // QT = queue TID set
 
 async function load(){
-  try{const r=await fetch('/api/report');D=await r.json();
+  try{
+    const[rr,rq]=await Promise.all([fetch('/api/report'),fetch('/api/queue')]);
+    D=await rr.json();
+    const qj=await rq.json();
+    QT=new Set((qj.items||[]).map(i=>i.tid));
     document.getElementById('scanTime').textContent=D.scan_time||'—';
-    cards();badges();render()}catch(e){document.getElementById('table').innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
+    cards();badges();render();updateQueueBadge();
+  }catch(e){document.getElementById('table').innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
+}
+function updateQueueBadge(){
+  const b=document.getElementById('queueBadge'),c=document.getElementById('queueCount');
+  b.style.display=QT.size?'':'none';c.textContent=QT.size;
 }
 function cards(){
   const s=D.summary||{};
@@ -157,26 +171,26 @@ function render(){
 
   let h='';
   if(tab==='updated'){
-    h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
+    h='<table><tr><th style="width:28px"><input type="checkbox" id="cbAll" onchange="toggleAll(this)" title="全选"></th><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
     for(const i of pp){
-      const t=i.forum_thread||{},w=i.wiki_article||{};
-      h+=`<tr${i.skipped?' class=skipped':''}><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      const t=i.forum_thread||{},w=i.wiki_article||{},inQ=QT.has(t.tid);
+      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${w.last_update||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td><small>${i.reason||''}</small></td>
         <td>
-          <button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button>
+          <button class="btn" style="background:${inQ?'#e8f5e9':'#e8f0fe'};color:${inQ?'#2e7d32':'#1967d2'};padding:3px 10px;font-size:12px" onclick="toggleQueue(${t.tid})">${inQ?'已加入队列':'加入队列'}</button>
           <button class="btn" style="background:${i.skipped?'#e8f5e9':'#fafafa'};color:${i.skipped?'#2e7d32':'#999'};padding:3px 8px;font-size:12px;margin-left:4px" onclick="skipToggle(${t.tid})">${i.skipped?'取消':'跳过'}</button>
         </td></tr>`;
     }
   }else if(tab==='new'){
-    h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
+    h='<table><tr><th style="width:28px"><input type="checkbox" id="cbAll" onchange="toggleAll(this)" title="全选"></th><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
     for(const i of pp){
-      const t=i.forum_thread||{};
-      h+=`<tr${i.skipped?' class=skipped':''}><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      const t=i.forum_thread||{},inQ=QT.has(t.tid);
+      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td>${t.is_newcomer?'<span class="tag tag-new">新人</span>':''}</td>
         <td>
-          <button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button>
+          <button class="btn" style="background:${inQ?'#e8f5e9':'#e8f0fe'};color:${inQ?'#2e7d32':'#1967d2'};padding:3px 10px;font-size:12px" onclick="toggleQueue(${t.tid})">${inQ?'已加入队列':'加入队列'}</button>
           <button class="btn" style="background:${i.skipped?'#e8f5e9':'#fafafa'};color:${i.skipped?'#2e7d32':'#999'};padding:3px 8px;font-size:12px;margin-left:4px" onclick="skipToggle(${t.tid})">${i.skipped?'取消':'跳过'}</button>
         </td></tr>`;
     }
@@ -193,6 +207,7 @@ function render(){
   h+='</table>';
   if(!it.length)h='<div class="empty">无数据</div>';
   document.getElementById('table').innerHTML=h;
+  document.getElementById('btnBatch').style.display=(tab==='new'||tab==='updated')?'':'none';
 
   let ph=`<span style="color:#888">共 ${it.length} 条</span>`;
   if(tp>1){
@@ -204,13 +219,36 @@ function render(){
   }
   document.getElementById('pager').innerHTML=ph;
 }
+function toggleAll(cb){document.querySelectorAll('.row-cb').forEach(c=>c.checked=cb.checked)}
 function go(p){pg=p;render();window.scrollTo(0,300)}
 function proxyUrl(url){if(!url)return'#';return'/proxy'+new URL(url).pathname}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function fmt(n){return n?n.toLocaleString():'0'}
 
 async function refresh(){
-  try{const r=await fetch('/api/report');D=await r.json();cards();badges();render();toast('数据已刷新','ok')}catch(e){toast('刷新失败: '+e.message,'err')}
+  try{
+    const[rr,rq]=await Promise.all([fetch('/api/report'),fetch('/api/queue')]);
+    D=await rr.json();const qj=await rq.json();
+    QT=new Set((qj.items||[]).map(i=>i.tid));
+    cards();badges();render();updateQueueBadge();toast('数据已刷新','ok');
+  }catch(e){toast('刷新失败: '+e.message,'err')}
+}
+async function toggleQueue(tid){
+  if(QT.has(tid)){await fetch('/api/queue/'+tid,{method:'DELETE'});QT.delete(tid)}
+  else{await fetch('/api/queue/'+tid,{method:'POST'});QT.add(tid)}
+  D.queued_tids=[...QT];updateQueueBadge();render();
+}
+async function clearQueue(){
+  if(!confirm('确定清空导入队列？'))return;
+  await fetch('/api/queue',{method:'DELETE'});QT.clear();updateQueueBadge();render();toast('队列已清空','ok');
+}
+async function batchQueue(){
+  const cbs=document.querySelectorAll('.row-cb:checked');let n=0;
+  for(const cb of cbs){
+    const tid=parseInt(cb.value);
+    if(!QT.has(tid)){await fetch('/api/queue/'+tid,{method:'POST'});QT.add(tid);n++}
+  }
+  updateQueueBadge();render();toast(`已加入 ${n} 篇到队列`,'ok');
 }
 async function rescan(){
   const b=document.getElementById('btnScan');b.disabled=true;b.textContent='扫描中...';toast('扫描已启动，请稍候...','ok');
