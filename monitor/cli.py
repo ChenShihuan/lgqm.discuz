@@ -424,16 +424,16 @@ def cmd_webui(args):
 
 def cmd_update(args):
     """更新已有 Wiki 文章"""
-    from monitor.fetcher import fetch_thread
+    from monitor.fetcher import fetch_thread, fetch_images
     from monitor.indexer import load_wiki_index
     from monitor.converter import update_existing_wiki, save_wiki_file
-    import os as _os
+    from monitor.config import tid_img_dir
+    import os as _os, re as _re
 
     tid = args.tid
 
     # 找到对应的 Wiki 文章
     articles = load_wiki_index()
-    # 匹配 forum_tid 或 forum_tids 中任一 TID
     matched = [a for a in articles
                if a.forum_tid == tid or tid in (a.forum_tids or [])]
     if not matched:
@@ -452,18 +452,44 @@ def cmd_update(args):
     with open(filepath, "r", encoding="utf-8") as f:
         existing_content = f.read()
 
+    # 提取文章名（用于输出目录）
+    article_name = article.title
+    name_match = _re.search(r'\|\s*同人作品\s*=\s*(.+)', existing_content)
+    if name_match:
+        v = name_match.group(1).strip()
+        if v and v != "{{PAGENAME}}":
+            article_name = v
+
     # 拉取最新内容
     print(f"正在拉取 TID={tid} 最新内容...")
     posts = fetch_thread(tid, verbose=True)
 
-    # 生成更新版
-    new_content = update_existing_wiki(existing_content, posts)
-    new_filepath = save_wiki_file(new_content, f"TID-{tid}-updated", tid=tid)
+    # 构建 metadata（传递日期信息）
+    date = ""
+    if posts:
+        posts_sorted = sorted(posts, key=lambda p: p.date or "", reverse=True)
+        if posts_sorted and posts_sorted[0].date:
+            dm = _re.match(r'(\d{4}-\d{1,2}-\d{1,2})', posts_sorted[0].date)
+            if dm:
+                date = dm.group(1)
+    metadata = {"post_date": date} if date else None
+
+    # 生成更新版（增量追加）
+    new_content = update_existing_wiki(existing_content, posts, metadata=metadata)
+    new_filepath = save_wiki_file(new_content, article_name, tid=tid)
 
     print(f"\n原文件: {filepath}")
     print(f"新文件: {new_filepath}")
     print(f"共 {len(posts)} 楼")
     print()
+
+    # 下载图片
+    if args.download_images:
+        print("--- 下载图片 ---")
+        images = fetch_images(tid, output_dir=tid_img_dir(tid, article_name), verbose=True)
+        if images:
+            print(f"下载了 {len(images)} 张图片")
+
     print("--- 更新后内容预览（前 500 字）---")
     print(new_content[:500])
 
@@ -472,25 +498,11 @@ def cmd_update(args):
         print("\n--- 更新同人作品列表 ---")
         try:
             from monitor.index_list import update_article
-            import re as _re
-
-            # 从原文件提取文章名
-            name_match = _re.search(r'\|\s*同人作品\s*=\s*(.+)', existing_content)
-            if name_match:
-                article_name = name_match.group(1).strip()
-                # 提取最近更新日期
-                date = ""
-                posts_sorted = sorted(posts, key=lambda p: p.date or "", reverse=True)
-                if posts_sorted:
-                    date_match = _re.match(r'(\d{4}-\d{1,2}-\d{1,2})', posts_sorted[0].date or "")
-                    if date_match:
-                        date = date_match.group(1)
-
-                if article_name and date:
-                    update_article(article_name, last_update=date)
-                    print(f"✅ 作品列表已更新: [[{article_name}]] 最近更新 → {date}")
-                else:
-                    print("⚠️  无法提取文章名或日期")
+            if article_name and date:
+                update_article(article_name, last_update=date)
+                print(f"✅ 作品列表已更新: [[{article_name}]] 最近更新 → {date}")
+            else:
+                print("⚠️  无法提取文章名或日期")
         except Exception as e:
             print(f"⚠️  作品列表更新失败: {e}")
 
@@ -543,6 +555,7 @@ def main():
     # update
     p_up = subparsers.add_parser("update", help="更新 Wiki 文章")
     p_up.add_argument("tid", type=int, help="帖子 TID")
+    p_up.add_argument("--download-images", action="store_true", help="同时下载图片")
     p_up.add_argument("--update-list", action="store_true", help="更新同人作品列表")
 
     # webui

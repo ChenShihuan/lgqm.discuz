@@ -366,78 +366,112 @@ def save_wiki_file(content: str, filename: str, output_dir: str = None,
 def update_existing_wiki(existing_content: str, new_posts: List[Post],
                           metadata: dict = None) -> str:
     """
-    更新已有的 Wiki 文章：保留原 Infobox 头部，替换正文内容
+    增量更新已有的 Wiki 文章：保留原文全部内容，仅追加论坛新楼层。
 
-    Args:
-        existing_content: 现有 .mw 文件内容
-        new_posts: 新拉取的楼层列表
-        metadata: 新的元数据（可选，用于更新日期等）
-
-    Returns:
-        更新后的 Wiki 文本
+    核心原则：以 Wiki 原文为基准，最小修改。
+    - 保留 Infobox / 章节 / 格式 / 分类标签
+    - 从论坛楼层中找出 Wiki 上次更新之后的新楼层
+    - 追加新楼层到原文末尾（{{首行缩进end}} 之前）
     """
-    # 提取现有 Infobox（从开头到 {{首行缩进start}}）
+    # 1. 解析原文：Infobox + 正文 + 尾部（end/category）
     infobox_match = re.search(
         r'(.*?\{\{首行缩进start\}\})',
-        existing_content,
-        re.DOTALL
+        existing_content, re.DOTALL
     )
     infobox = infobox_match.group(1) if infobox_match else generate_infobox(metadata or {})
 
-    # 如果提供了新元数据，更新最近更新日期
+    # 正文 = Infobox 之后到 {{首行缩进end}} 之前
+    after_infobox = existing_content[infobox_match.end():] if infobox_match else existing_content
+    end_match = re.search(r'\{\{首行缩进end\}\}', after_infobox)
+    if end_match:
+        body = after_infobox[:end_match.start()]
+        tail = after_infobox[end_match.start():]  # {{首行缩进end}} + categories
+    else:
+        body = after_infobox
+        tail = "\n{{首行缩进end}}\n[[分类:同人作品]]"
+
+    # 2. 更新「最近更新」日期
     if metadata and metadata.get("post_date"):
         date_str = metadata["post_date"]
         if isinstance(date_str, str):
-            date_match = re.match(r'(\d{4}-\d{1,2}-\d{1,2})', date_str)
-            if date_match:
-                date_str = date_match.group(1)
+            m = re.match(r'(\d{4}-\d{1,2}-\d{1,2})', date_str)
+            if m:
+                date_str = m.group(1)
         infobox = re.sub(
-            r'(\|\s*最近更新\s*=\s*<!--[^>]*-->)\S*',
+            r'(\|\s*最近更新\s*=\s*(?:<!--[^>]*-->)?)\s*\S*',
             rf'\1{date_str}',
             infobox
         )
 
-    # 获取作者名（从 Infobox 或首楼）
+    # 3. 提取 Wiki 上次更新日期（用于判断新楼层）
+    wiki_date = ""
+    date_match = re.search(r'\|\s*最近更新\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)', infobox)
+    if date_match:
+        wiki_date = date_match.group(1).strip()
+
+    # 4. 获取作者名
     thread_author = ""
-    author_match = re.search(r'\|\s*官方论坛\s*=\s*<!--[^>]*-->\s*(\S+)', infobox)
-    if not author_match:
-        author_match = re.search(r'\|\s*官方论坛\s*=\s*(\S+)', infobox)
+    author_match = re.search(r'\|\s*官方论坛\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)', infobox)
     if author_match:
         thread_author = author_match.group(1).strip()
     if not thread_author and new_posts:
         first = next((p for p in new_posts if p.is_first_post), new_posts[0])
         thread_author = first.author.strip()
 
-    # 转换新内容
+    # 5. 找出论坛新楼层（日期晚于 Wiki 上次更新）
     config = {
-        "auto_title": 0,
-        "auto_threshold": 200,
-        "title_style": "==",
-        "show_date": 0,
-        "split_line": False,
+        "auto_title": 0, "auto_threshold": 200,
+        "title_style": "==", "show_date": 0, "split_line": False,
     }
 
-    seen = set()
-    parts = [infobox.strip()]
+    new_parts = []
+    seen_in_body = set()
+
+    # 从正文中提取已有的内容片段用于去重
+    for chunk in body.split('\n\n'):
+        chunk = chunk.strip()
+        if len(chunk) > 50:
+            seen_in_body.add(chunk[:200])
+
     for post in new_posts:
-        wiki_text = convert_post(post, config)
-        if not wiki_text:
+        # 跳过首楼（已在 Wiki 中）
+        if post.is_first_post:
             continue
 
-        # 去重
+        wiki_text = convert_post(post, config)
+        if not wiki_text or not wiki_text.strip():
+            continue
+
+        # 判断是否为新楼层：日期晚于 wiki_date 或内容未在正文中出现
+        post_date = ""
+        if post.date:
+            dm = re.match(r'(\d{4}-\d{1,2}-\d{1,2})', post.date)
+            if dm:
+                post_date = dm.group(1)
+
+        is_newer = post_date and wiki_date and post_date > wiki_date
+        in_body = wiki_text.strip()[:200] in seen_in_body
+
+        if not is_newer and in_body:
+            continue  # 已在 Wiki 正文中，跳过
+
+        # 去重（新楼层之间）
         norm = wiki_text.strip()[:200]
-        if norm and norm in seen:
+        if norm in seen_in_body:
             continue
         if len(norm) > 30:
-            seen.add(norm)
+            seen_in_body.add(norm)
 
         # 非作者回复包裹同人注释
-        if not post.is_first_post and thread_author and post.author.strip() != thread_author:
+        if thread_author and post.author.strip() != thread_author:
             wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
 
-        parts.append(wiki_text)
+        new_parts.append(wiki_text)
 
-    parts.append("\n{{首行缩进end}}")
-    parts.append("[[分类:同人作品]]")
+    # 6. 组装：Infobox + 原正文 + 新楼层 + 尾部
+    result = infobox.strip() + "\n" + body.strip()
+    if new_parts:
+        result += "\n\n" + "\n\n".join(new_parts)
+    result += "\n" + tail.strip()
 
-    return "\n\n".join(parts)
+    return result
