@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(claude plugin *)",
+      "Read(//c/Users/cnchensh/.claude/**)",
+      "Read(//c/Users/cnchensh/.claude/plugins/**)",
+      "Bash(python3 -m monitor.cli scan --full)"
     ]
   }
 }

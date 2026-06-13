@@ -53,6 +53,8 @@ python3 -m monitor.cli review-info <TARGET>
 - 查找「第X章」「序章」「终章」「尾声」等标记
 - 格式化为 `=== 第X章 标题 ===`（3 级标题）
 - 章节超过 3 节时，在 `{{首行缩进start}}` 后添加 `__TOC__`
+- **论坛 raw 格式标题**：`'''N.标题'''` 或 `'''终章.xxx'''` → 转换为 `== 标题 ==`（2 级标题），下篇新增章节用 `== ==` 与上篇/下篇的 `= =` 区分层级
+- 上篇/下篇用 `= =`（1 级），章节用 `== ==`（2 级），小节用 `=== ===`（3 级）
 
 **2c. 同人注释边界检查**
 对于同人注释，应当根据**同人注释规则**进行检查
@@ -61,10 +63,42 @@ python3 -m monitor.cli review-info <TARGET>
 - 清理注释块内的「本帖最后由」「发表于」残留
 - 检查 `{{同人注释end}}` 后是否有重复内容 → 删除
 
-**2d. 清理**
-- `&nbsp;` → 空格
-- 连续空行 > 2 → 压缩为 2
-- `.raw.mw` 残留的 `{{PAGENAME}}` 占位符 → 替换为文章名
+**2d. 段落格式化与清理**
+
+论坛导入的文章常见以下格式问题，需逐项修复：
+
+1. **首行缩进空格**：论坛用 4 个 `&nbsp;`（被 converter 转为 4 个普通空格）作为段落缩进。在 MediaWiki 中由 `{{首行缩进start}}` 模板处理，这些空格应转为段落分隔 `\n\n`：
+   ```python
+   # 正文区域内 2+连续空格 → 段落分隔
+   body = re.sub(r' {2,}', '\n\n', body)
+   ```
+
+2. **邻行合并**：论坛每行一个段落，但导入后相邻非空行之间缺少空行。需在每对相邻非空行之间插入空行：
+   ```python
+   for i, line in enumerate(lines):
+       result.append(line.rstrip())
+       if i < len(lines)-1 and line.rstrip() and lines[i+1].rstrip():
+           result.append('')
+   ```
+
+3. **常规清理**：
+   - `\xa0` (non-breaking space) → 删除（保护 Infobox 区域）
+   - `[[Image:static/image/smiley/...]]` → 删除（论坛内置表情，非文章配图）
+   - `[[Image:static/image/common/...]]` → 删除（论坛 UI 图标）
+   - 连续空行 > 3 → 压缩为 2
+   - `.raw.mw` 残留的 `{{PAGENAME}}` 占位符 → 替换为文章名
+   - `<!--作者ID-->` 注释 → 删除
+
+4. **同人注释质量过滤**：见下方「同人注释规则」章节。
+
+**2e. 更新文章专项审阅（增量合并）**
+
+对已有 Wiki 文章执行 update 后，需额外检查：
+
+1. **定位 Wiki 最后一章在论坛原文中的位置**：取 Wiki 最后 200 字的指纹，在 fresh import 中搜索匹配 → 匹配位置之后的内容才是真正新增
+2. **删除重复章节**：fresh import 中 Wiki 已有章节（标题不同但内容相同）需识别并跳过
+3. **仅插入新增内容**：将 fresh import 中 Wiki 末章之后的新章节追加到 Wiki 原文末尾
+4. **新章节标题格式化**：按 2b 规则转换 raw 标题
 
 ### Step 3: 对比差异
 
@@ -72,22 +106,7 @@ python3 -m monitor.cli review-info <TARGET>
 diff -u <TARGET> <TARGET_DIR>/<NAME>.mw | head -200
 ```
 
-### Step 4: 复制到 Wiki 仓库
-
-对于新导入的文章：
-```bash
-# TARGET_DIR 为 TARGET 的父目录（如 output/22085-淞沪启明同人/）
-cp <TARGET_DIR>/text/<NAME>.mw lgqm.huijiwiki.com/
-cp <TARGET_DIR>/img/* lgqm.huijiwiki.com/ 2>/dev/null  # 如有图片
-cd lgqm.huijiwiki.com
-git add <NAME>.mw
-git commit -m "导入同人: <NAME>"
-```
-
-> **注意**: `TARGET_DIR` 为 `TARGET` 所在目录（`dirname TARGET`），内含 `text/` 和 `img/` 子目录。
-
-对于已有的文章，应当比对差异后，将更新的部分更新到已有mw文章
-TODO 
+同时输出变更摘要：章节数变化、同人注释数变化、段落数变化、文件大小变化。
 
 ## 同人注释规则
 
@@ -102,6 +121,20 @@ TODO
 - 长度 < 10 字且无实质信息的回复（如「写得好」「不错」「等更」）→ 删除
 - 仅重复正文内容、无补充信息的回复 → 删除
 - 同一用户重复发相同/高度相似内容 → 去重，保留一条
+
+**同人注释批量过滤脚本：**
+```python
+def should_keep(text):
+    clean = re.sub(r'\[\[Image:[^]]+\]\]', '', text).strip()
+    clean = re.sub(r'\n+', ' ', clean).strip()
+    if not clean: return False
+    if len(clean) < 10: return False
+    praise = ['赞美更新','催更','加油','顶','支持','楼主加油','前排','马克','留名','先赞后看','写得好','等更','好康']
+    for pw in praise:
+        if pw in clean and len(clean) < 25: return False
+    if re.match(r'^[\s!！。.…\-—~～0-9a-zA-Z]+$', clean) and len(clean) < 15: return False
+    return True
+```
 
 **评论需有补充价值才保留：**
 - 提供背景知识/考据/纠错 → 保留并精简

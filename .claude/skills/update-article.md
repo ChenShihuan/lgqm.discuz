@@ -26,25 +26,17 @@ python3 -m monitor.cli update <TID> --update-list
 
 `--update-list` 会自动更新 `同人作品列表.mw` 中对应条目的「最近更新」日期。
 
-### Step 2: 展示差异
+### Step 2: 进入审阅
 
-对比新旧 .mw 文件，展示差异供用户审阅。
+导入完成后，使用 review-article skill 进行交互式优化：
+
+```
+/review-article <文章名>
+```
 
 ### Step 3: 确认并复制到 Wiki 仓库
 
-```bash
-# 找到生成的更新文件
-NEW_FILE=$(ls -t output/*-updated.mw | head -1)
-echo "更新文件: $NEW_FILE"
-
-# 覆盖到 Wiki 仓库（需确认）
-cp "$NEW_FILE" lgqm.huijiwiki.com/"${NEW_FILE##*/%-updated.mw}".mw
-
-# 提交
-cd lgqm.huijiwiki.com
-git add *.mw 同人作品列表.mw
-git commit -m "更新同人: $(basename "$NEW_FILE" .mw | sed 's/-updated$//')"
-```
+TODO 重写此逻辑
 
 ## 注意事项
 

@@ -46,10 +46,11 @@ Converter 自动处理：
 - 相邻高度重复楼层 → 去重跳过
 - 附件图片 → 自动嵌入为 `[[File:xxx.jpg|600px]]`（需 `--download-images` 下载文件）
 - 附件 UI 元素（下载链接、文件大小、上传时间）→ 自动清理
+- 论坛内置表情 → 自动过滤（static/image/smiley + static/image/common）
 
 ### Step 2: 进入审阅
 
-导入完成后，使用 review-article skill 进行交互式优化：
+导入完成后，使用 review-article skill 进行交互式优化（含段落格式化、章节标题转换、同人注释过滤、重复检测等）：
 
 ```
 /review-article <文章名>
@@ -57,14 +58,18 @@ Converter 自动处理：
 
 ### Step 3: 复制到 Wiki 仓库（审阅完成后）
 
+对于新导入的文章：
 ```bash
-# 复制 .mw 和图片到 Wiki 仓库
-cp output/<TID>-<文章名>/text/<NAME>.mw lgqm.huijiwiki.com/
-cp output/<TID>-<文章名>/img/* lgqm.huijiwiki.com/ 2>/dev/null  # 如有图片
+# TARGET_DIR 为 TARGET 的父目录（如 output/22085-淞沪启明同人/）
+cp <TARGET_DIR>/text/<NAME>.mw lgqm.huijiwiki.com/
+cp <TARGET_DIR>/img/* lgqm.huijiwiki.com/ 2>/dev/null  # 如有图片
 cd lgqm.huijiwiki.com
-git add <NAME>.mw 同人作品列表.mw
-git commit -m "导入同人: <NAME>（含作品列表更新）"
+git add <NAME>.mw
+git commit -m "导入同人: <NAME>"
 ```
+
+> **注意**: `TARGET_DIR` 为 `TARGET` 所在目录（`dirname TARGET`），内含 `text/` 和 `img/` 子目录。
+
 
 > `--update-list` 已在上一步自动追加新条目到 `同人作品列表.mw`。
 
