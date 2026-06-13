@@ -38,6 +38,8 @@ table{width:100%;border-collapse:collapse;background:var(--card);border-radius:8
 th{background:#f5f6fa;padding:9px 10px;text-align:left;font-size:12px;color:#666;border-bottom:2px solid #e0e0e0;white-space:nowrap}
 td{padding:7px 10px;border-bottom:1px solid #f0f0f0}
 tr:hover td{background:#f8f9ff}
+tr.skipped td{opacity:.45}
+tr.skipped:hover td{opacity:.7;background:#fafafa}
 a{color:#2980b9;text-decoration:none}
 a:hover{text-decoration:underline}
 .tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600}
@@ -88,6 +90,9 @@ a:hover{text-decoration:underline}
     <option value="standard">标准文章（含原创标签）</option>
     <option value="other">其他帖子</option>
   </select>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none">
+    <input type="checkbox" id="showSkipped" onchange="render()"> 显示已跳过
+  </label>
 </div>
 
 <div class="table-wrap" id="table"></div>
@@ -119,15 +124,17 @@ function badges(){
 }
 function items(){
   if(!D)return[];
-  if(tab==='updated')return D.updated_items||[];
-  if(tab==='new'){
+  let all=[];
+  if(tab==='updated')all=D.updated_items||[];
+  else if(tab==='new'){
     const cat=document.getElementById('catFilter').value;
-    const all=D.new_items||[];
-    if(cat==='standard')return all.filter(i=>i.category==='standard');
-    if(cat==='other')return all.filter(i=>i.category==='other');
-    return all;
-  }
-  return D.possible_matches||[];
+    all=D.new_items||[];
+    if(cat==='standard')all=all.filter(i=>i.category==='standard');
+    else if(cat==='other')all=all.filter(i=>i.category==='other');
+  }else all=D.possible_matches||[];
+  // filter skipped
+  if(!document.getElementById('showSkipped').checked) all=all.filter(i=>!i.skipped);
+  return all;
 }
 function render(){
   let it=items();
@@ -151,19 +158,25 @@ function render(){
     h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{};
-      h+=`<tr><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr${i.skipped?' class=skipped':''}><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${w.last_update||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td><small>${i.reason||''}</small></td>
-        <td><button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button></td></tr>`;
+        <td>
+          <button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button>
+          <button class="btn" style="background:${i.skipped?'#e8f5e9':'#fafafa'};color:${i.skipped?'#2e7d32':'#999'};padding:3px 8px;font-size:12px;margin-left:4px" onclick="skipToggle(${t.tid})">${i.skipped?'取消':'跳过'}</button>
+        </td></tr>`;
     }
   }else if(tab==='new'){
     h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{};
-      h+=`<tr><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr${i.skipped?' class=skipped':''}><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td>${t.is_newcomer?'<span class="tag tag-new">新人</span>':''}</td>
-        <td><button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button></td></tr>`;
+        <td>
+          <button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button>
+          <button class="btn" style="background:${i.skipped?'#e8f5e9':'#fafafa'};color:${i.skipped?'#2e7d32':'#999'};padding:3px 8px;font-size:12px;margin-left:4px" onclick="skipToggle(${t.tid})">${i.skipped?'取消':'跳过'}</button>
+        </td></tr>`;
     }
   }else{
     h='<table><tr><th>TID</th><th>论坛标题</th><th>Wiki 候选</th><th>文件名</th><th>置信度</th><th>验证</th><th>原因</th></tr>';
@@ -204,6 +217,17 @@ async function rescan(){
 }
 async function doImport(tid){
   try{const r=await fetch('/api/import/'+tid,{method:'POST'});const j=await r.json();toast(j.message||'','ok')}catch(e){toast('导入失败: '+e.message,'err')}
+}
+async function skipToggle(tid){
+  const item=findItem(tid);const cur=item?item.skipped:false;
+  try{
+    const r=await fetch('/api/skipped/'+tid,{method:cur?'DELETE':'POST'});
+    if(r.ok){item.skipped=!cur;render();toast(cur?'已取消跳过':'已标记跳过','ok')}
+  }catch(e){toast('操作失败: '+e.message,'err')}
+}
+function findItem(tid){
+  for(const k of['new_items','updated_items']){for(const i of D[k]||[]){if(i.forum_thread.tid===tid)return i}}
+  return null;
 }
 function toast(msg,type){
   const t=document.createElement('div');t.className='toast toast-'+type;t.textContent=msg;document.body.appendChild(t);

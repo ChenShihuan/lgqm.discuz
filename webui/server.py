@@ -59,6 +59,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_error(405)
 
+    def do_DELETE(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path.startswith("/api/"):
+            self._handle_api("DELETE", path)
+        else:
+            self.send_error(405)
+
     def _serve_static(self, path):
         """静态文件服务"""
         if path == "/":
