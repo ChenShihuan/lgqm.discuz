@@ -207,6 +207,16 @@ def cmd_import(args):
     print("\n--- 内容预览（前 500 字）---")
     print(wiki_content[:500])
 
+    # Step 7: 更新同人作品列表
+    if args.update_list:
+        print("\n--- 更新同人作品列表 ---")
+        try:
+            from monitor.index_list import update_from_mw_file
+            action, seq, name = update_from_mw_file(filepath)
+            print(f"✅ 作品列表已{action}: #{seq} [[{name}]]")
+        except Exception as e:
+            print(f"⚠️  作品列表更新失败: {e}")
+
 
 def _clean_article_name(title: str) -> str:
     """从论坛帖子标题生成 Wiki 文章名"""
@@ -342,6 +352,23 @@ def cmd_fetch_images(args):
         print("无图片或下载失败")
 
 
+def cmd_renumber_list(args):
+    """校正同人作品列表序号"""
+    from monitor.index_list import renumber_list
+
+    print("正在分析列表序号...")
+    result = renumber_list(dry_run=args.dry_run)
+
+    print(f"总条目: {result['total']}")
+    print(f"修正序号: {result['changed']} 处")
+    print(f"分卷共享序号: {result['issues_fixed']} 组")
+
+    if args.dry_run:
+        print("\n⚠️  --dry-run 模式，未实际修改文件")
+    else:
+        print("\n✅ 列表序号已校正")
+
+
 def cmd_update(args):
     """更新已有 Wiki 文章"""
     from monitor.fetcher import fetch_thread
@@ -385,6 +412,33 @@ def cmd_update(args):
     print("--- 更新后内容预览（前 500 字）---")
     print(new_content[:500])
 
+    # 更新同人作品列表
+    if args.update_list:
+        print("\n--- 更新同人作品列表 ---")
+        try:
+            from monitor.index_list import update_article
+            import re as _re
+
+            # 从原文件提取文章名
+            name_match = _re.search(r'\|\s*同人作品\s*=\s*(.+)', existing_content)
+            if name_match:
+                article_name = name_match.group(1).strip()
+                # 提取最近更新日期
+                date = ""
+                posts_sorted = sorted(posts, key=lambda p: p.date or "", reverse=True)
+                if posts_sorted:
+                    date_match = _re.match(r'(\d{4}-\d{1,2}-\d{1,2})', posts_sorted[0].date or "")
+                    if date_match:
+                        date = date_match.group(1)
+
+                if article_name and date:
+                    update_article(article_name, last_update=date)
+                    print(f"✅ 作品列表已更新: [[{article_name}]] 最近更新 → {date}")
+                else:
+                    print("⚠️  无法提取文章名或日期")
+        except Exception as e:
+            print(f"⚠️  作品列表更新失败: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -421,6 +475,7 @@ def main():
     p_im = subparsers.add_parser("import", help="导入帖子")
     p_im.add_argument("tid", type=int, help="帖子 TID")
     p_im.add_argument("--download-images", action="store_true", help="同时下载图片")
+    p_im.add_argument("--update-list", action="store_true", help="更新同人作品列表")
 
     # fetch-images
     p_fi = subparsers.add_parser("fetch-images", help="下载帖子图片")
@@ -433,6 +488,11 @@ def main():
     # update
     p_up = subparsers.add_parser("update", help="更新 Wiki 文章")
     p_up.add_argument("tid", type=int, help="帖子 TID")
+    p_up.add_argument("--update-list", action="store_true", help="更新同人作品列表")
+
+    # renumber-list
+    p_rl = subparsers.add_parser("renumber-list", help="校正同人作品列表序号")
+    p_rl.add_argument("--dry-run", action="store_true", help="仅预览，不实际修改")
 
     args = parser.parse_args()
 
@@ -452,6 +512,7 @@ def main():
         "fetch-images": cmd_fetch_images,
         "review-info": cmd_review_info,
         "update": cmd_update,
+        "renumber-list": cmd_renumber_list,
     }
 
     commands[args.command](args)

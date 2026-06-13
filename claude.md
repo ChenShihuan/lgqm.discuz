@@ -79,13 +79,14 @@ export LGQM_PASSWORD="密码"
 ### CLI 命令
 
 ```bash
-# 导入新文章（含图片下载）
-python3 -m monitor.cli import <TID> --download-images
+# 导入新文章（含图片下载 + 作品列表更新）
+python3 -m monitor.cli import <TID> --download-images --update-list
 
 # 审阅原始文件
 python3 -m monitor.cli review-info output/<TID>-<文章名>/text/<NAME>.raw.mw
 
 # 下载图片（保存到 output/<TID>-<文章名>/img/）
+python3 -m monitor.cli fetch-images <TID>
 python3 -m monitor.cli fetch-images <TID>
 ```
 
