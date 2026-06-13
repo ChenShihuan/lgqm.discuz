@@ -3,6 +3,10 @@ WebUI API 路由模块
 """
 import json
 import os
+import re
+
+# 新帖分类规则：标题标签含"原创"的为标准文章
+_ORIGINAL_PATTERN = re.compile(r'^[【\[「〈][^】\]」〉]*原创[^】\]」〉]*[】\]」〉]')
 
 
 def router(method: str, path: str, report_path: str, data_dir: str) -> tuple:
@@ -24,11 +28,29 @@ def router(method: str, path: str, report_path: str, data_dir: str) -> tuple:
 
 
 def _get_report(report_path: str) -> tuple:
-    """返回 diff_report.json"""
+    """返回 diff_report.json（含新帖分类标记）"""
     if not os.path.exists(report_path):
         return 404, {"error": "报告文件不存在，请先执行监控扫描"}
     with open(report_path, "r", encoding="utf-8") as f:
-        return 200, json.load(f)
+        data = json.load(f)
+
+    # 为新帖添加分类标记
+    standard_count = 0
+    other_count = 0
+    for item in data.get("new_items", []):
+        title = item["forum_thread"]["title"]
+        if _ORIGINAL_PATTERN.match(title):
+            item["category"] = "standard"
+            standard_count += 1
+        else:
+            item["category"] = "other"
+            other_count += 1
+
+    # 补充到 summary
+    data["summary"]["new_standard"] = standard_count
+    data["summary"]["new_other"] = other_count
+
+    return 200, data
 
 
 def _run_scan(report_path: str, data_dir: str) -> tuple:

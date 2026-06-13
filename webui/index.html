@@ -83,6 +83,11 @@ a:hover{text-decoration:underline}
     <option value="-last_reply_date">最近回复 ↓</option>
     <option value="title">标题 A-Z</option>
   </select>
+  <select id="catFilter" onchange="render()" style="display:none">
+    <option value="all">全部新帖</option>
+    <option value="standard">标准文章（含原创标签）</option>
+    <option value="other">其他帖子</option>
+  </select>
 </div>
 
 <div class="table-wrap" id="table"></div>
@@ -101,7 +106,7 @@ function cards(){
   document.getElementById('cards').innerHTML=[
     {n:s.total_forum_threads||0,l:'论坛帖子'},
     {n:s.total_wiki_articles||0,l:'Wiki 文章'},
-    {n:s.new_threads||0,l:'新帖',c:'c1'},
+    {n:(s.new_standard||0)+' / '+(s.new_other||0),l:'新帖 (原创 / 其他)',c:'c1'},
     {n:s.updated_threads||0,l:'更新帖',c:'c2'},
     {n:s.possible_matches||0,l:'疑似匹配',c:'c2'},
     {n:(s.verified_accessible||0)+' / '+(s.verified_inaccessible||0),l:'已验证 (可达/不可达)',c:'c3'},
@@ -115,7 +120,13 @@ function badges(){
 function items(){
   if(!D)return[];
   if(tab==='updated')return D.updated_items||[];
-  if(tab==='new')return D.new_items||[];
+  if(tab==='new'){
+    const cat=document.getElementById('catFilter').value;
+    const all=D.new_items||[];
+    if(cat==='standard')return all.filter(i=>i.category==='standard');
+    if(cat==='other')return all.filter(i=>i.category==='other');
+    return all;
+  }
   return D.possible_matches||[];
 }
 function render(){
@@ -201,7 +212,10 @@ function toast(msg,type){
 
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
-  t.classList.add('on');tab=t.dataset.tab;pg=1;render();
+  t.classList.add('on');tab=t.dataset.tab;pg=1;
+  document.getElementById('catFilter').style.display=tab==='new'?'':'none';
+  document.getElementById('catFilter').value='all';
+  render();
 }));
 load();
 </script>
