@@ -87,7 +87,8 @@ a:hover{text-decoration:underline}
   </select>
   <select id="catFilter" onchange="render()" style="display:none">
     <option value="all">全部新帖</option>
-    <option value="standard">标准文章（含原创标签）</option>
+    <option value="standard">标准同人（原创/短篇）</option>
+    <option value="video">视频</option>
     <option value="other">其他帖子</option>
   </select>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none">
@@ -111,7 +112,7 @@ function cards(){
   document.getElementById('cards').innerHTML=[
     {n:s.total_forum_threads||0,l:'论坛帖子'},
     {n:s.total_wiki_articles||0,l:'Wiki 文章'},
-    {n:(s.new_standard||0)+' / '+(s.new_other||0),l:'新帖 (原创 / 其他)',c:'c1'},
+    {n:(s.new_standard||0)+' / '+(s.new_video||0)+' / '+(s.new_other||0),l:'新帖 (原创/视频/其他)',c:'c1'},
     {n:s.updated_threads||0,l:'更新帖',c:'c2'},
     {n:s.possible_matches||0,l:'疑似匹配',c:'c2'},
     {n:(s.verified_accessible||0)+' / '+(s.verified_inaccessible||0),l:'已验证 (可达/不可达)',c:'c3'},
@@ -130,6 +131,7 @@ function items(){
     const cat=document.getElementById('catFilter').value;
     all=D.new_items||[];
     if(cat==='standard')all=all.filter(i=>i.category==='standard');
+    else if(cat==='video')all=all.filter(i=>i.category==='video');
     else if(cat==='other')all=all.filter(i=>i.category==='other');
   }else all=D.possible_matches||[];
   // filter skipped

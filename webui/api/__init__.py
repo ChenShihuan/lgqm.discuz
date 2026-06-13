@@ -5,8 +5,25 @@ import json
 import os
 import re
 
-# 新帖分类规则：标题标签含"原创"的为标准文章
-_ORIGINAL_PATTERN = re.compile(r'^[【\[「〈][^】\]」〉]*原创[^】\]」〉]*[】\]」〉]')
+# 提取标题中所有【标签】和（标签）
+_TAG_PATTERN = re.compile(r'[【\[「〈（]([^】\]」〉）]*)[】\]」〉）]')
+
+
+def _classify(title: str) -> str:
+    """
+    根据标题所有标签分类（不限于首个）：
+    - 'video':    含「视频」标签
+    - 'standard': 含「原创」或「短篇」（包括短篇同人/超短篇等变体）
+    - 'other':    其他
+    """
+    tags = [t.strip() for t in _TAG_PATTERN.findall(title)]
+    for tag in tags:
+        if '视频' in tag:
+            return 'video'
+    for tag in tags:
+        if '原创' in tag or '短篇' in tag:
+            return 'standard'
+    return 'other'
 
 
 def _skip_path(data_dir: str) -> str:
@@ -83,14 +100,15 @@ def _get_report(report_path: str, data_dir: str) -> tuple:
     # 为新帖添加分类 + 跳过标记
     standard_count = 0
     other_count = 0
+    video_count = 0
     for item in data.get("new_items", []):
         tid = item["forum_thread"]["tid"]
-        title = item["forum_thread"]["title"]
-        if _ORIGINAL_PATTERN.match(title):
-            item["category"] = "standard"
+        item["category"] = _classify(item["forum_thread"]["title"])
+        if item["category"] == "standard":
             standard_count += 1
+        elif item["category"] == "video":
+            video_count += 1
         else:
-            item["category"] = "other"
             other_count += 1
         item["skipped"] = tid in skip_tids
 
@@ -100,6 +118,7 @@ def _get_report(report_path: str, data_dir: str) -> tuple:
 
     data["summary"]["new_standard"] = standard_count
     data["summary"]["new_other"] = other_count
+    data["summary"]["new_video"] = video_count
     data["summary"]["skipped_count"] = len(skip_tids)
     data["skipped_tids"] = sorted(list(skip_tids))
 
