@@ -369,6 +369,14 @@ def cmd_renumber_list(args):
         print("\n✅ 列表序号已校正")
 
 
+def cmd_webui(args):
+    """启动本地看板服务器"""
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from webui.server import serve
+    serve(port=args.port)
+
+
 def cmd_update(args):
     """更新已有 Wiki 文章"""
     from monitor.fetcher import fetch_thread
@@ -490,6 +498,10 @@ def main():
     p_up.add_argument("tid", type=int, help="帖子 TID")
     p_up.add_argument("--update-list", action="store_true", help="更新同人作品列表")
 
+    # webui
+    p_wb = subparsers.add_parser("webui", help="启动本地看板服务器")
+    p_wb.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
+
     # renumber-list
     p_rl = subparsers.add_parser("renumber-list", help="校正同人作品列表序号")
     p_rl.add_argument("--dry-run", action="store_true", help="仅预览，不实际修改")
@@ -513,6 +525,7 @@ def main():
         "review-info": cmd_review_info,
         "update": cmd_update,
         "renumber-list": cmd_renumber_list,
+        "webui": cmd_webui,
     }
 
     commands[args.command](args)

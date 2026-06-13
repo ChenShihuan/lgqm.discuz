@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>临高启明同人监控看板</title>
+<style>
+:root{--bg:#f0f2f5;--card:#fff;--text:#333;--muted:#888;--primary:#1a1a2e;--red:#e74c3c;--orange:#f39c12;--green:#27ae60}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.5 -apple-system,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text)}
+header{background:linear-gradient(135deg,var(--primary),#16213e);color:#fff;padding:16px 32px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+header h1{font-size:20px;font-weight:600}
+header .meta{font-size:12px;opacity:.7}
+header .actions{display:flex;gap:8px}
+.btn{padding:6px 16px;border:none;border-radius:6px;font-size:13px;cursor:pointer;transition:.2s}
+.btn-light{background:rgba(255,255,255,.15);color:#fff}
+.btn-light:hover{background:rgba(255,255,255,.25)}
+.btn-scan{background:var(--orange);color:#fff}
+.btn-scan:hover{opacity:.85}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:16px 32px}
+.card{background:var(--card);border-radius:8px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.card .n{font-size:26px;font-weight:700;color:var(--primary)}
+.card .l{font-size:12px;color:var(--muted);margin-top:2px}
+.card.c1 .n{color:var(--red)}
+.card.c2 .n{color:var(--orange)}
+.card.c3 .n{color:var(--green)}
+.tabs{display:flex;padding:0 32px;border-bottom:2px solid #ddd;gap:0}
+.tab{padding:10px 18px;cursor:pointer;font-size:14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-2px;transition:.2s;user-select:none}
+.tab:hover{color:var(--primary)}
+.tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.tab .b{display:inline-block;background:var(--red);color:#fff;font-size:11px;min-width:18px;text-align:center;padding:0 5px;border-radius:10px;margin-left:4px;line-height:18px}
+.toolbar{display:flex;gap:12px;padding:16px 32px 0;align-items:center;flex-wrap:wrap}
+.toolbar input{padding:7px 12px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:260px;outline:none}
+.toolbar input:focus{border-color:var(--primary)}
+.toolbar select{padding:7px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;background:#fff}
+.table-wrap{overflow-x:auto;padding:12px 32px 20px}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:13px}
+th{background:#f5f6fa;padding:9px 10px;text-align:left;font-size:12px;color:#666;border-bottom:2px solid #e0e0e0;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #f0f0f0}
+tr:hover td{background:#f8f9ff}
+a{color:#2980b9;text-decoration:none}
+a:hover{text-decoration:underline}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600}
+.tag-new{background:#e8f5e9;color:#2e7d32}
+.tag-up{background:#fff3e0;color:#e65100}
+.tag-ok{background:#e3f2fd;color:#1565c0}
+.tag-fail{background:#fce4ec;color:#c62828}
+.pager{display:flex;gap:8px;padding:0 32px 24px;justify-content:center;align-items:center}
+.pager button{padding:5px 12px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer;font-size:13px}
+.pager button:disabled{opacity:.3;cursor:default}
+.pager button:hover:not(:disabled){background:#f0f0f0}
+.pager .pg{font-weight:600;padding:5px 10px}
+.empty{padding:40px;text-align:center;color:#999}
+.toast{position:fixed;top:16px;right:16px;padding:12px 20px;border-radius:6px;color:#fff;font-size:13px;z-index:999;animation:fadein .3s}
+.toast-ok{background:var(--green)}
+.toast-err{background:var(--red)}
+@keyframes fadein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>临高启明 同人监控看板</h1><div class="meta" id="scanTime">—</div></div>
+  <div class="actions">
+    <button class="btn btn-light" onclick="refresh()">刷新数据</button>
+    <button class="btn btn-scan" onclick="rescan()" id="btnScan">重新扫描</button>
+  </div>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<div class="tabs">
+  <div class="tab on" data-tab="updated">更新帖 <span class="b" id="bnUpdated">0</span></div>
+  <div class="tab" data-tab="new">新帖 <span class="b" id="bnNew">0</span></div>
+  <div class="tab" data-tab="possible">疑似匹配 <span class="b" id="bnPossible">0</span></div>
+</div>
+
+<div class="toolbar">
+  <input type="text" id="q" placeholder="搜索标题 / 作者 / TID..." oninput="render()">
+  <select id="sort" onchange="render()">
+    <option value="">默认排序</option>
+    <option value="-reply_count">回复数 ↓</option>
+    <option value="-view_count">查看数 ↓</option>
+    <option value="-last_reply_date">最近回复 ↓</option>
+    <option value="title">标题 A-Z</option>
+  </select>
+</div>
+
+<div class="table-wrap" id="table"></div>
+<div class="pager" id="pager"></div>
+
+<script>
+let D=null,tab='updated',pg=1,P=50;
+
+async function load(){
+  try{const r=await fetch('/api/report');D=await r.json();
+    document.getElementById('scanTime').textContent=D.scan_time||'—';
+    cards();badges();render()}catch(e){document.getElementById('table').innerHTML='<div class="empty">加载失败: '+e.message+'</div>'}
+}
+function cards(){
+  const s=D.summary||{};
+  document.getElementById('cards').innerHTML=[
+    {n:s.total_forum_threads||0,l:'论坛帖子'},
+    {n:s.total_wiki_articles||0,l:'Wiki 文章'},
+    {n:s.new_threads||0,l:'新帖',c:'c1'},
+    {n:s.updated_threads||0,l:'更新帖',c:'c2'},
+    {n:s.possible_matches||0,l:'疑似匹配',c:'c2'},
+    {n:(s.verified_accessible||0)+' / '+(s.verified_inaccessible||0),l:'已验证 (可达/不可达)',c:'c3'},
+  ].map(x=>`<div class="card${x.c?' '+x.c:''}"><div class="n">${x.n}</div><div class="l">${x.l}</div></div>`).join('')
+}
+function badges(){
+  document.getElementById('bnUpdated').textContent=(D.updated_items||[]).length;
+  document.getElementById('bnNew').textContent=(D.new_items||[]).length;
+  document.getElementById('bnPossible').textContent=(D.possible_matches||[]).length;
+}
+function items(){
+  if(!D)return[];
+  if(tab==='updated')return D.updated_items||[];
+  if(tab==='new')return D.new_items||[];
+  return D.possible_matches||[];
+}
+function render(){
+  let it=items();
+  const q=document.getElementById('q').value.toLowerCase();
+  if(q)it=it.filter(i=>{
+    const t=i.forum_thread||{};
+    return(t.title||'').toLowerCase().includes(q)||(t.author||'').toLowerCase().includes(q)||String(t.tid).includes(q);
+  });
+  const s=document.getElementById('sort').value;
+  if(s==='-reply_count')it.sort((a,b)=>(b.forum_thread?.reply_count||0)-(a.forum_thread?.reply_count||0));
+  else if(s==='-view_count')it.sort((a,b)=>(b.forum_thread?.view_count||0)-(a.forum_thread?.view_count||0));
+  else if(s==='-last_reply_date')it.sort((a,b)=>(b.forum_thread?.last_reply_date||'').localeCompare(a.forum_thread?.last_reply_date||''));
+  else if(s==='title')it.sort((a,b)=>(a.forum_thread?.title||'').localeCompare(b.forum_thread?.title||''));
+
+  const tp=Math.max(1,Math.ceil(it.length/P));
+  if(pg>tp)pg=tp;
+  const pp=it.slice((pg-1)*P,pg*P);
+
+  let h='';
+  if(tab==='updated'){
+    h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
+    for(const i of pp){
+      const t=i.forum_thread||{},w=i.wiki_article||{};
+      h+=`<tr><td><a href="${t.url}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+        <td>${t.last_reply_date||'-'}</td><td>${w.last_update||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
+        <td><small>${i.reason||''}</small></td>
+        <td><button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button></td></tr>`;
+    }
+  }else if(tab==='new'){
+    h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
+    for(const i of pp){
+      const t=i.forum_thread||{};
+      h+=`<tr><td><a href="${t.url}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+        <td>${t.last_reply_date||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
+        <td>${t.is_newcomer?'<span class="tag tag-new">新人</span>':''}</td>
+        <td><button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button></td></tr>`;
+    }
+  }else{
+    h='<table><tr><th>TID</th><th>论坛标题</th><th>Wiki 候选</th><th>文件名</th><th>置信度</th><th>验证</th><th>原因</th></tr>';
+    for(const i of pp){
+      const t=i.forum_thread||{},w=i.wiki_article||{};
+      const vs=i.verified,vt=vs===true?'<span class="tag tag-ok">可达</span>':vs===false?'<span class="tag tag-fail">不可达</span>':'<span class="tag">未验证</span>';
+      h+=`<tr><td><a href="${t.url||'#'}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td>
+        <td>${esc(w.title||'-')}</td><td>${w.filename||'-'}</td>
+        <td>${((i.confidence||0)*100).toFixed(0)}%</td><td>${vt}</td><td><small>${i.reason||''}</small></td></tr>`;
+    }
+  }
+  h+='</table>';
+  if(!it.length)h='<div class="empty">无数据</div>';
+  document.getElementById('table').innerHTML=h;
+
+  let ph=`<span style="color:#888">共 ${it.length} 条</span>`;
+  if(tp>1){
+    ph+=`<button onclick="go(1)" ${pg===1?'disabled':''}>首页</button>`;
+    ph+=`<button onclick="go(${pg-1})" ${pg===1?'disabled':''}>上一页</button>`;
+    ph+=`<span class="pg">${pg} / ${tp}</span>`;
+    ph+=`<button onclick="go(${pg+1})" ${pg===tp?'disabled':''}>下一页</button>`;
+    ph+=`<button onclick="go(${tp})" ${pg===tp?'disabled':''}>末页</button>`;
+  }
+  document.getElementById('pager').innerHTML=ph;
+}
+function go(p){pg=p;render();window.scrollTo(0,300)}
+function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function fmt(n){return n?n.toLocaleString():'0'}
+
+async function refresh(){
+  try{const r=await fetch('/api/report');D=await r.json();cards();badges();render();toast('数据已刷新','ok')}catch(e){toast('刷新失败: '+e.message,'err')}
+}
+async function rescan(){
+  const b=document.getElementById('btnScan');b.disabled=true;b.textContent='扫描中...';toast('扫描已启动，请稍候...','ok');
+  try{const r=await fetch('/api/scan',{method:'POST'});const j=await r.json();toast(j.message||'','ok')}catch(e){toast('扫描失败: '+e.message,'err')}
+  b.disabled=false;b.textContent='重新扫描';
+}
+async function doImport(tid){
+  try{const r=await fetch('/api/import/'+tid,{method:'POST'});const j=await r.json();toast(j.message||'','ok')}catch(e){toast('导入失败: '+e.message,'err')}
+}
+function toast(msg,type){
+  const t=document.createElement('div');t.className='toast toast-'+type;t.textContent=msg;document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3000);
+}
+
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on');tab=t.dataset.tab;pg=1;render();
+}));
+load();
+</script>
+</body>
+</html>
