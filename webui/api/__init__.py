@@ -84,6 +84,10 @@ def router(method: str, path: str, report_path: str, data_dir: str) -> tuple:
     if method == "GET" and path == "/api/report":
         return _get_report(report_path, data_dir)
 
+    # GET /api/wiki
+    if method == "GET" and path == "/api/wiki":
+        return _get_wiki(data_dir)
+
     # GET /api/skipped
     if method == "GET" and path == "/api/skipped":
         s = _load_skipped(data_dir)
@@ -225,6 +229,20 @@ def _add_to_queue(data_dir: str, tid: int) -> tuple:
     })
     _save_queue(data_dir, items)
     return 200, {"message": f"已加入队列: [{tid}] {title[:40]}", "count": len(items)}
+
+
+def _get_wiki(data_dir: str) -> tuple:
+    """返回 Wiki 文章列表"""
+    wiki_path = os.path.join(data_dir, "wiki_index.json")
+    if not os.path.exists(wiki_path):
+        return 404, {"error": "wiki_index.json 不存在，请先运行 index-wiki"}
+    with open(wiki_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    # 附加上跳过状态
+    skipped = _load_skipped(data_dir)
+    for a in data.get("articles", []):
+        a["skipped"] = a.get("forum_tid") in skipped["tids"]
+    return 200, data
 
 
 def _remove_from_queue(data_dir: str, tid: int) -> tuple:

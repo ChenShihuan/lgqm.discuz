@@ -78,6 +78,7 @@ a:hover{text-decoration:underline}
   <div class="tab on" data-tab="updated">更新帖 <span class="b" id="bnUpdated">0</span></div>
   <div class="tab" data-tab="new">新帖 <span class="b" id="bnNew">0</span></div>
   <div class="tab" data-tab="possible">疑似匹配 <span class="b" id="bnPossible">0</span></div>
+  <div class="tab" data-tab="wiki">Wiki 文章 <span class="b" id="bnWiki">0</span></div>
 </div>
 
 <div class="toolbar">
@@ -105,13 +106,14 @@ a:hover{text-decoration:underline}
 <div class="pager" id="pager"></div>
 
 <script>
-let D=null,tab='updated',pg=1,P=50,QT={};  // QT = queue TID set
+let D=null,W=null,tab='updated',pg=1,P=50,QT={};  // D=report, W=wiki
 
 async function load(){
   try{
-    const[rr,rq]=await Promise.all([fetch('/api/report'),fetch('/api/queue')]);
+    const[rr,rq,rw]=await Promise.all([fetch('/api/report'),fetch('/api/queue'),fetch('/api/wiki')]);
     D=await rr.json();
     const qj=await rq.json();
+    W=await rw.json();
     QT=new Set((qj.items||[]).map(i=>i.tid));
     document.getElementById('scanTime').textContent=D.scan_time||'—';
     cards();badges();render();updateQueueBadge();
@@ -136,6 +138,7 @@ function badges(){
   document.getElementById('bnUpdated').textContent=(D.updated_items||[]).length;
   document.getElementById('bnNew').textContent=(D.new_items||[]).length;
   document.getElementById('bnPossible').textContent=(D.possible_matches||[]).length;
+  document.getElementById('bnWiki').textContent=W?W.total:0;
 }
 function items(){
   if(!D)return[];
@@ -147,7 +150,11 @@ function items(){
     if(cat==='standard')all=all.filter(i=>i.category==='standard');
     else if(cat==='video')all=all.filter(i=>i.category==='video');
     else if(cat==='other')all=all.filter(i=>i.category==='other');
-  }else all=D.possible_matches||[];
+  }else if(tab==='possible')all=D.possible_matches||[];
+  else if(tab==='wiki'){
+    if(!W)return[];
+    all=(W.articles||[]).map(a=>({_wiki:true,...a}));
+  }
   // filter skipped
   if(!document.getElementById('showSkipped').checked) all=all.filter(i=>!i.skipped);
   return all;
@@ -194,7 +201,7 @@ function render(){
           <button class="btn" style="background:${i.skipped?'#e8f5e9':'#fafafa'};color:${i.skipped?'#2e7d32':'#999'};padding:3px 8px;font-size:12px;margin-left:4px" onclick="skipToggle(${t.tid})">${i.skipped?'取消':'跳过'}</button>
         </td></tr>`;
     }
-  }else{
+  }else if(tab==='possible'){
     h='<table><tr><th>TID</th><th>论坛标题</th><th>Wiki 候选</th><th>文件名</th><th>置信度</th><th>验证</th><th>原因</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{};
@@ -203,11 +210,20 @@ function render(){
         <td>${esc(w.title||'-')}</td><td>${w.filename||'-'}</td>
         <td>${((i.confidence||0)*100).toFixed(0)}%</td><td>${vt}</td><td><small>${i.reason||''}</small></td></tr>`;
     }
+  }else if(tab==='wiki'){
+    h='<table><tr><th>文件名</th><th>标题</th><th>作者</th><th>论坛 TID</th><th>首发</th><th>最近更新</th><th>完结</th></tr>';
+    for(const i of pp){
+      h+=`<tr><td>${esc(i.filename||'')}</td><td>${esc(i.title||'')}</td><td>${esc(i.author||'')}</td>
+        <td>${i.forum_tid?`<a href=\"/proxy/thread-${i.forum_tid}-1-1.html\" target=\"_blank\">${i.forum_tid}</a>`:'-'}</td>
+        <td>${i.first_publish||'-'}</td><td>${i.last_update||'-'}</td>
+        <td>${i.is_completed||'-'}</td></tr>`;
+    }
   }
   h+='</table>';
   if(!it.length)h='<div class="empty">无数据</div>';
   document.getElementById('table').innerHTML=h;
   document.getElementById('btnBatch').style.display=(tab==='new'||tab==='updated')?'':'none';
+  document.getElementById('showSkipped').parentElement.style.display=tab==='wiki'?'none':'';
 
   let ph=`<span style="color:#888">共 ${it.length} 条</span>`;
   if(tp>1){
@@ -279,6 +295,7 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   t.classList.add('on');tab=t.dataset.tab;pg=1;
   document.getElementById('catFilter').style.display=tab==='new'?'':'none';
   document.getElementById('catFilter').value='all';
+  document.getElementById('showSkipped').parentElement.style.display=tab==='wiki'?'none':'';
   render();
 }));
 load();
