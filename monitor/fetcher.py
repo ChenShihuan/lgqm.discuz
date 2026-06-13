@@ -8,7 +8,7 @@ import time
 import requests
 from typing import List, Optional
 
-from .config import get
+from .config import get, tid_img_dir
 from .models import Post, ForumThread
 from .utils import log, rate_limit, set_verbose, clean_html
 from .auth import get_cookie
@@ -154,7 +154,8 @@ def parse_archiver_posts(html: str) -> List[dict]:
 
 def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
     """
-    拉取指定帖子的全部内容（通过 Archiver 模式）
+    拉取指定帖子的全部内容。
+    优先使用常规页面（cookie 登录），失败时回退到 Archiver 模式。
 
     Args:
         tid: 帖子ID
@@ -164,11 +165,76 @@ def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
         Post 列表，按楼层顺序排列
     """
     set_verbose(verbose)
-    log(f"开始拉取帖子 TID={tid} (Archiver 模式)...", "INFO")
+    log(f"开始拉取帖子 TID={tid} (常规页面模式)...", "INFO")
 
+    # 优先使用常规页面（需要 cookie）
+    posts = _fetch_thread_regular(tid, verbose=verbose)
+
+    # 常规页面失败时回退到 Archiver
+    if len(posts) == 0:
+        log("常规页面模式返回 0 楼，尝试 Archiver 模式...", "WARN")
+        posts = _fetch_thread_archiver(tid, verbose=verbose)
+
+    log(f"拉取完成：共 {len(posts)} 楼", "SUCCESS")
+    return posts
+
+
+def get_thread_title(tid: int) -> str:
+    """
+    从常规页面提取帖子标题（需要 cookie）
+
+    Args:
+        tid: 帖子ID
+
+    Returns:
+        帖子标题，失败返回空字符串
+    """
+    try:
+        from lxml import etree
+    except ImportError:
+        return ""
+
+    url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
+    try:
+        resp = requests.get(
+            url, headers=_make_headers(),
+            timeout=get("forum.request_timeout", 30)
+        )
+        resp.encoding = "utf-8"
+        if resp.status_code != 200:
+            return ""
+
+        # 检查 JS challenge
+        if len(resp.text) < 5000 and resp.text.count("<script") >= 2:
+            return ""
+
+        tree = etree.HTML(resp.text)
+
+        # 标题：<span id="thread_subject"> 或 <h1> 或 <title>
+        for xpath in [
+            '//span[@id="thread_subject"]/text()',
+            '//h1//text()',
+            '//title/text()',
+        ]:
+            results = tree.xpath(xpath)
+            for text in results:
+                text = text.strip()
+                # 清理 title 标签的后缀
+                if " - " in text and "Powered by" in text:
+                    text = text.split(" - ")[0].strip()
+                if text and len(text) > 1:
+                    return text
+    except Exception:
+        pass
+    return ""
+
+
+def _fetch_thread_archiver(tid: int, verbose: bool = False) -> List[Post]:
+    """通过 Archiver 模式拉取（旧版回退方案）"""
     # 获取总页数
     total_pages = get_archiver_pages(tid)
-    log(f"帖子共 {total_pages} 页", "INFO")
+    if verbose:
+        log(f"Archiver: 帖子共 {total_pages} 页", "INFO")
 
     all_posts_data = []
     interval = get("forum.request_interval", 2.0)
@@ -182,15 +248,14 @@ def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
         last_req = time.time()
 
         if html is None:
-            log(f"第 {page} 页获取失败", "WARN")
+            log(f"Archiver 第 {page} 页获取失败", "WARN")
             continue
 
         posts_data = parse_archiver_posts(html)
         all_posts_data.extend(posts_data)
         if verbose:
-            log(f"第 {page}/{total_pages} 页: {len(posts_data)} 楼", "INFO")
+            log(f"Archiver 第 {page}/{total_pages} 页: {len(posts_data)} 楼", "INFO")
 
-    # 转换为 Post 对象
     posts = []
     for data in all_posts_data:
         posts.append(Post(
@@ -200,8 +265,106 @@ def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
             floor=data["floor"],
             is_first_post=data["is_first_post"],
         ))
+    return posts
 
-    log(f"拉取完成：共 {len(posts)} 楼", "SUCCESS")
+
+def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
+    """通过常规页面拉取帖子（需要 cookie，适用于反爬保护下的回退）"""
+    try:
+        from lxml import etree
+    except ImportError:
+        log("常规页面模式需要 lxml: pip install lxml", "ERROR")
+        return []
+
+    all_posts_data = []
+    page = 1
+
+    while True:
+        url = f"https://lgqmonline.top/thread-{tid}-{page}-1.html"
+        try:
+            resp = requests.get(
+                url, headers=_make_headers(),
+                timeout=get("forum.request_timeout", 30)
+            )
+            resp.encoding = "utf-8"
+        except Exception as e:
+            log(f"第 {page} 页请求失败: {e}", "WARN")
+            break
+
+        if resp.status_code != 200:
+            log(f"第 {page} 页 HTTP {resp.status_code}", "WARN")
+            break
+
+        # 检查 JS challenge
+        if len(resp.text) < 5000 and resp.text.count("<script") >= 2:
+            log("遇到反爬 JS 验证，请稍后重试", "ERROR")
+            break
+
+        tree = etree.HTML(resp.text)
+        post_tables = tree.xpath('//table[contains(@id, "pid")]')
+        if not post_tables:
+            break
+
+        for i, table in enumerate(post_tables):
+            # 作者
+            auth_elem = table.xpath('.//*[contains(@class,"authi")]')
+            author = ""
+            auth_text = ""
+            if auth_elem:
+                auth_text = auth_elem[0].xpath("string()").strip()
+                a_tag = auth_elem[0].find(".//a")
+                author = a_tag.text.strip() if a_tag is not None and a_tag.text else ""
+
+            # 日期：authi 里的 <em> 或 <span>
+            date = ""
+            if auth_elem:
+                em_tag = auth_elem[0].find(".//em")
+                if em_tag is not None and em_tag.text:
+                    date = em_tag.text.strip()
+                else:
+                    span_tag = auth_elem[0].find(".//span")
+                    if span_tag is not None:
+                        date = (span_tag.text or "").strip() or (span_tag.get("title") or "")
+
+            # 内容（含附件图片）
+            t_fsz = table.xpath('.//div[contains(@class,"t_fsz")]')
+            content_html = ""
+            if t_fsz:
+                # 提取完整 t_fsz 内容（包含正文 td.t_f + 附件 div.pattl）
+                content_html = etree.tostring(t_fsz[0], encoding="unicode")
+            else:
+                content_elem = table.xpath('.//td[contains(@class,"t_f")]')
+                if content_elem:
+                    content_html = etree.tostring(content_elem[0], encoding="unicode")
+
+            if author or content_html:
+                all_posts_data.append({
+                    "author": author,
+                    "date": date,
+                    "content_html": content_html,
+                    "floor": len(all_posts_data) + 1,
+                    "is_first_post": len(all_posts_data) == 0,
+                })
+
+        if verbose:
+            log(f"第 {page}/{page} 页: {len(post_tables)} 楼", "INFO")
+
+        # 检查是否有下一页
+        next_page = tree.xpath('//a[contains(@class,"nxt")]')
+        if not next_page:
+            break
+        page += 1
+        time.sleep(1.0)
+
+    posts = []
+    for data in all_posts_data:
+        posts.append(Post(
+            author=data["author"],
+            date=data["date"],
+            content_html=data["content_html"],
+            floor=data["floor"],
+            is_first_post=data["is_first_post"],
+        ))
     return posts
 
 
@@ -221,7 +384,7 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
     set_verbose(verbose)
 
     if output_dir is None:
-        output_dir = f"{get('output.img_dir')}/{tid}"
+        output_dir = tid_img_dir(tid)
 
     os.makedirs(output_dir, exist_ok=True)
 

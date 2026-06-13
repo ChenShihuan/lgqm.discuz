@@ -1,6 +1,6 @@
 # 论坛同人监控与 Wiki 同步系统 — 设计文档
 
-> 版本: 1.0 | 日期: 2026-06-07
+> 版本: 1.1 | 日期: 2026-06-13
 
 ---
 
@@ -49,14 +49,22 @@ forum-39 (Discuz X3.4)
      │
      ▼ (人工审阅)
 ┌─────────────┐
-│ fetcher.py  │  Archiver 模式拉取帖子（无需 cookie）
-│             │  → Post 列表 + 图片下载
+│ fetcher.py  │  常规页面拉取帖子（cookie）+ 附件图片
+│             │  Archiver 模式兜底（无需 cookie）
+│             │  → Post 列表 + 图片文件
 └─────────────┘
      │
      ▼
 ┌─────────────┐
 │converter.py │  HTML → MediaWiki 标记 + Infobox 生成
-│             │  → output/{filename}.mw
+│             │  附件图片 <img file> → [[File:xxx.jpg|600px]]
+│             │  → output/{filename}.raw.mw + .mw
+└─────────────┘
+     │
+     ▼ (人工审阅)
+┌─────────────┐
+│ review skill│  补全 Infobox → 格式化章节 → 清理注释
+│             │  → 对比差异 → 嵌入图片引用
 └─────────────┘
      │
      ▼ (人工审阅)
@@ -68,48 +76,42 @@ forum-39 (Discuz X3.4)
 | 模块 | 文件 | 核心职责 |
 |------|------|---------|
 | 配置 | `config.py` | 统一配置，环境变量注入敏感信息 |
+| 认证 | `auth.py` | 论坛登录获取 cookie，支持静态/动态 cookie |
 | 模型 | `models.py` | ForumThread, Post, WikiArticle, DiffReport |
 | 工具 | `utils.py` | TID 提取, URL 解析, 日期处理, 日志 |
 | 监控 | `monitor.py` | 扫描 forum-39, 解析 Discuz HTML, 提取帖子元数据 |
 | 索引 | `indexer.py` | 解析 .mw 文件, 提取 Infobox 字段, 构建 TID 索引 |
 | 对比 | `diff.py` | TID 匹配, 日期比较, 生成差异报告 |
-| 拉取 | `fetcher.py` | Archiver 模式获取, 楼层解析, 图片下载 |
-| 转换 | `converter.py` | HTML→Wiki 标记, Infobox 生成, 文件保存 |
+| 拉取 | `fetcher.py` | 常规页面 + Archiver 双模式, 楼层解析, 附件图片下载 |
+| 转换 | `converter.py` | HTML→Wiki 标记, 图片嵌入, Infobox 生成, 文件保存 |
+| CLI | `cli.py` | 命令行入口: import, fetch-images, review-info 等 |
 
 ---
 
 ## 3. 关键技术决策
 
-### 3.1 内容获取：Discuz Archiver 模式
+### 3.1 内容获取：双模式策略
 
-经过对三种内容获取方式的对比研究，选择 **Archiver 模式**作为主力：
+优先使用常规页面（cookie 登录，功能完整），Archiver 模式作为兜底：
 
-| 模式 | HTML 清洁度 | 图片 | 需 Cookie | URL |
-|------|------------|------|----------|-----|
-| **Archiver** ⭐ | 极干净 | 无 | **否** | `/archiver/?tid-{tid}.html` |
-| Printable | 中等(div 过多) | 有限 | 否 | `forum.php?mod=viewthread&action=printable` |
-| 普通页面 | 复杂(JS/CSS 多) | 完整 | 是 | `thread-{tid}-{page}-1.html` |
+| 模式 | HTML 清洁度 | 图片附件 | 需 Cookie | URL |
+|------|------------|---------|----------|-----|
+| **常规页面** ⭐ | 中等 | **完整** | 是 | `thread-{tid}-{page}-1.html` |
+| Archiver | 极干净 | 无 | 否 | `/archiver/?tid-{tid}.html` |
 
-**Archiver 结构**（每层楼）：
-```html
-<p class="author">
-    <strong>作者名</strong>
-    发表于 <span title="YYYY-M-D HH:MM:SS">时间</span>
-</p>
-<h3>帖子标题</h3>      ← 仅首楼
-正文内容<br />
-...
-```
+**常规页面**通过 cookie 登录获取完整帖子内容（含附件图片的 `<div class="pattl">`），Archiver 模式在 cookie 不可用时自动回退。
 
-**优势**：
-- 无需 cookie 即可获取内容（Archiver 公开访问）
-- HTML 极简，仅 `<strong>`, `<br>`, `<a>` 等基础标签
-- 代码量 ~100 行 vs 旧 lgqmtr 的 ~400 行递归解析
-- 函数式 API 接口
+### 3.2 图片处理：内联转换
 
-### 3.2 图片处理：独立通道
+v1.1 重大改进：附件图片不再作为独立下载通道，而是在内容拉取时一并捕获，由 converter 自动内联转换。
 
-Archiver 不含图片，需从常规页面单独下载（需要 cookie 登录态）。
+**流程**：
+1. `fetcher._fetch_thread_regular()` 提取 `div.t_fsz`（包含正文 `td.t_f` + 附件 `div.pattl`）
+2. `converter.html_to_wiki()` 识别 `<img file="...">` 和 `<img zoomfile="...">` 标签
+3. 自动转换为 `[[File:xxx.jpg|600px]]`，清理附件 UI 残留（下载链接、文件大小、上传时间）
+4. `fetch_images()` 并行下载实际图片文件到 `img/{tid}/`
+
+**优势**：图片引用自动嵌入到帖子中的正确位置，无需人工定位插入点。
 
 ### 3.3 差异检测算法
 
@@ -176,15 +178,29 @@ diff.py    → compare        → diff_report.json
 ```
 用户: "导入 <tid>"
   ↓
-fetcher.py   → Archiver 拉取 → Post[] 
-converter.py → 格式转换     → .mw 文件
+fetcher.py   → 常规页面拉取（含附件） → Post[] 
+converter.py → 格式转换（图片自动嵌入） → .raw.mw + .mw
+fetch_images → 下载图片文件 → img/{tid}/
   ↓
-复制到 huijiwiki 仓库 → git commit
-  ↓
-展示 .mw 供审阅
+进入 review-article 审阅优化
 ```
 
-### 5.4 update-article — 更新文章
+### 5.4 review-article — 审阅优化
+
+```
+用户: "审阅 <文章名>"
+  ↓
+Step 1: review-info → 空白 Infobox 字段、章节标记、注释统计
+Step 2: 交互式优化:
+  - 2a: 补全 Infobox（地点、涉及方面、内容关键字、图像）
+  - 2b: 格式化章节标题（=== 第X章 标题 ===）+ __TOC__
+  - 2c: 边界检查（去重、去无意义、清理残留）
+  - 2d: 清理 &nbsp;、压缩空行、替换 {{PAGENAME}}
+Step 3: diff -u 对比差异
+Step 4: 复制到 Wiki 仓库 → git commit
+```
+
+### 5.5 update-article — 更新文章
 
 ```
 用户: "更新 <tid>"
@@ -226,8 +242,12 @@ converter.py → update_existing_wiki()
 | `<br />` | 换行 |
 | `<strong>text</strong>` | `'''text'''` |
 | `<a href="url">text</a>` | `[url text]` |
+| `<img file="xxx.jpg">` | `[[File:xxx.jpg\|600px]]` |
+| `<img zoomfile="xxx.jpg">` | `[[File:xxx.jpg\|600px]]` |
 | `<img src="...">` | `[[Image:...]]` |
-| `<blockquote>` | `{{同人注释start}}...{{同人注释end}}` |
+| 附件下载/大小/时间 | 自动清理 |
+| 「XXX 发表于 HH:MM」 | 自动删除 |
+| `&nbsp;` | 空格 |
 
 ---
 

@@ -12,15 +12,18 @@ lgqm.discuz/
 │   ├── config.py           # 统一配置
 │   ├── models.py           # 数据模型
 │   ├── utils.py            # 工具函数
+│   ├── auth.py             # 论坛登录认证
 │   ├── monitor.py          # 论坛板块扫描
 │   ├── indexer.py          # Wiki 文章索引
 │   ├── diff.py             # 差异对比
-│   ├── fetcher.py          # 内容拉取（Archiver 模式）
-│   └── converter.py        # 格式转换（→Wiki 标记）
+│   ├── fetcher.py          # 内容拉取（常规页面 + Archiver）
+│   ├── converter.py        # 格式转换（→Wiki 标记）
+│   └── cli.py              # 命令行入口
 ├── .claude/skills/         # Claude Code Skills
 │   ├── monitor-forum.md    # 论坛监控
 │   ├── diff-review.md      # 差异审阅
 │   ├── import-article.md   # 导入文章
+│   ├── review-article.md   # 审阅优化
 │   └── update-article.md   # 更新文章
 ├── data/                   # 运行时数据（gitignore）
 ├── doc/                    # 设计文档
@@ -60,8 +63,9 @@ export LGQM_COOKIE="你的论坛 Cookie 字符串"
 |-------|------|
 | "监控论坛" | 扫描 forum-39，对比 Wiki，生成差异报告 |
 | "查看差异" | 浏览差异报告详情 |
-| "导入 <tid>" | 拉取帖子内容，生成 .mw 文件，提交到 Wiki |
-| "更新 <tid>" | 更新已有 Wiki 文章的正文内容 |
+| "导入 \<tid\>" | 拉取帖子内容，生成 .raw.mw + .mw 文件（含图片下载） |
+| "审阅 \<文章名\>" | 交互式审阅优化 .mw 文件（补全 Infobox、格式化章节、清理注释） |
+| "更新 \<tid\>" | 更新已有 Wiki 文章的正文内容 |
 
 ### 直接调用 Python
 
@@ -97,9 +101,10 @@ save_wiki_file(wiki_content, "output_filename")
 ## 技术栈
 
 - **Python 3** + requests + lxml
-- **Discuz Archiver 模式**：极简 HTML 解析，无需 cookie
+- **Discuz 内容获取**：优先常规页面（cookie 登录，含图片附件），回退 Archiver 模式（无需 cookie）
+- **格式转换**：HTML → MediaWiki 标记，自动处理附件图片（`<img file>` → `[[File:...]]`）
 - **JSON 数据交换**：轻量，可 Git 追踪
 
 ## License
 
-MIT
+GPL-v3

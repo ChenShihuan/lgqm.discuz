@@ -121,7 +121,8 @@ def cmd_list_updated(args):
 
 def cmd_import(args):
     """导入帖子为新 Wiki 文章"""
-    from monitor.fetcher import fetch_thread, fetch_images
+    import re, os as _os
+    from monitor.fetcher import fetch_thread, fetch_images, get_thread_title
     from monitor.converter import convert_thread_to_wiki, save_wiki_file
 
     tid = args.tid
@@ -129,37 +130,204 @@ def cmd_import(args):
     # Step 1: 拉取帖子
     posts = fetch_thread(tid, verbose=True)
 
-    # 构建元数据
-    first_post = next((p for p in posts if p.is_first_post), posts[0] if posts else None)
-    if first_post:
-        metadata = {
-            "title": f"TID-{tid}",
-            "author": first_post.author,
-            "forum_url": f"https://lgqmonline.top/thread-{tid}-1-1.html",
-            "post_date": first_post.date,
-            "tid": str(tid),
-        }
+    if not posts:
+        print(f"错误：未能拉取 TID={tid} 的任何内容")
+        return
+
+    # Step 2: 提取线程标题并生成文章名
+    thread_title = get_thread_title(tid)
+    if thread_title:
+        # 清理标题：去前缀标签（【原创】等）、去日期后缀
+        article_name = _clean_article_name(thread_title)
+        print(f"\n📌 帖子标题: {thread_title}")
+        print(f"📝 文章名称: {article_name}")
     else:
-        metadata = {"title": f"TID-{tid}", "tid": str(tid)}
+        article_name = f"TID-{tid}"
+        thread_title = article_name
+        print(f"\n⚠️  未能提取标题，使用默认名: {article_name}")
 
-    # 转换为 Wiki 格式
-    wiki_content = convert_thread_to_wiki(posts, metadata=metadata)
-    filepath = save_wiki_file(wiki_content, f"TID-{tid}")
+    # Step 3: 构建元数据
+    first_post = next((p for p in posts if p.is_first_post), posts[0])
+    metadata = {
+        "title": article_name,
+        "author": first_post.author,
+        "forum_url": f"https://lgqmonline.top/thread-{tid}-1-1.html",
+        "post_date": first_post.date,
+        "tid": str(tid),
+    }
 
-    print(f"\n生成文件: {filepath}")
+    # Step 4: 转换为 Wiki 格式（原始版，不做任何替换）
+    raw_content = convert_thread_to_wiki(posts, metadata=metadata)
+
+    # 保存原始版 (.raw.mw) — 供 review skill 使用
+    safe_name = _sanitize_filename(article_name)
+    from monitor.config import tid_text_dir, tid_img_dir
+    raw_dir = tid_text_dir(tid, safe_name)
+    _os.makedirs(raw_dir, exist_ok=True)
+    raw_path = _os.path.join(raw_dir, f"{safe_name}.raw.mw")
+    with open(raw_path, 'w', encoding='utf-8') as f:
+        f.write(raw_content)
+    print(f"\n📄 原始文件: {raw_path}")
+
+    # 生成初步处理版 (.mw) — 仅做基础替换
+    wiki_content = raw_content
+    wiki_content = wiki_content.replace("{{PAGENAME}}", article_name)
+    wiki_content = wiki_content.replace(
+        f"[https://lgqmonline.top/thread-{tid}-1-1.html TID-{tid}]",
+        f"[https://lgqmonline.top/thread-{tid}-1-1.html {thread_title}]"
+    )
+    # 移除 <!--作者ID--> 注释
+    wiki_content = _os.linesep.join(
+        line.replace('<!--作者ID-->', '') for line in wiki_content.split('\n')
+    )
+
+    filepath = save_wiki_file(wiki_content, safe_name, tid=tid)
+    print(f"📝 处理文件: {filepath}")
     print(f"共 {len(posts)} 楼")
     print()
-    print("--- 内容预览（前 500 字）---")
-    print(wiki_content[:500])
 
-    # Step 2: 下载图片
+    # Step 5: 图片下载
+    images = []
     if args.download_images:
-        print("\n--- 下载图片 ---")
-        images = fetch_images(tid, verbose=True)
+        print("--- 下载图片 ---")
+        images = fetch_images(tid, output_dir=tid_img_dir(tid, safe_name), verbose=True)
         if images:
             print(f"下载了 {len(images)} 张图片")
+            if len(images) == 1:
+                img_file = _os.path.basename(images[0].get("local_path", ""))
+                print(f"💡 建议在 Infobox 图像字段填入: [[Image:{img_file}|class=img-responsive]]")
         else:
             print("无图片或下载失败")
+
+    # Step 6: 统计信息
+    _print_stats(raw_content, article_name, images)
+    _print_suggestions(wiki_content, article_name, images)
+
+    # 预览
+    print("\n--- 内容预览（前 500 字）---")
+    print(wiki_content[:500])
+
+
+def _clean_article_name(title: str) -> str:
+    """从论坛帖子标题生成 Wiki 文章名"""
+    import re
+    name = title.strip()
+
+    # 去掉前缀标签：【原创】、「同人」等
+    name = re.sub(r'^[【\[「〈](?:原创|同人|完结[了]?|转正)[】\]」〉]\s*', '', name)
+
+    # 去掉日期/更新后缀：如 " XX.XX.XX更新"、" 5.14更新"、" 更新至XX章"
+    name = re.sub(r'\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至第?\w+章)?$', '', name)
+    name = re.sub(r'\s*\d+年\d+月\d+日\s*(?:更新|彩蛋|尾声).*$', '', name)
+    name = re.sub(r'\s*更新至第?\w+章$', '', name)
+
+    # 去掉多余空格
+    name = name.strip()
+
+    return name if name else title.strip()
+
+
+def _sanitize_filename(name: str) -> str:
+    """清理文件名，替换不允许的字符"""
+    import re
+    # Windows/Linux 文件名不允许的字符
+    name = re.sub(r'[<>:"/\\|?*]', '-', name)
+    # 去掉首尾空格和点
+    name = name.strip('. ')
+    return name if name else "untitled"
+
+
+def _print_suggestions(content: str, article_name: str, images: list):
+    """分析内容并输出优化建议"""
+    suggestions = []
+
+    # 1. 检查 Infobox 字段完整性
+    if "| 地点 =" in content and "<!--" in content.split("| 地点 =")[1].split("\n")[0]:
+        suggestions.append("「地点」字段为空，建议填写故事发生地")
+    if "| 涉及方面 =" in content and "<!--" in content.split("| 涉及方面 =")[1].split("\n")[0]:
+        suggestions.append("「涉及方面」字段为空，建议填写关键词（如：工业、军事、外交等）")
+    if "| 内容关键字 =" in content and "<!--" in content.split("| 内容关键字 =")[1].split("\n")[0]:
+        suggestions.append("「内容关键字」字段为空，建议补充标签")
+
+    # 2. 检查是否包含 TOC
+    if "__TOC__" not in content and content.count("\n==") >= 3:
+        suggestions.append("正文超过 3 节，建议在 Infobox 后添加 __TOC__ 自动生成目录")
+
+    # 3. 图片建议
+    if not images:
+        suggestions.append("未检测到图片，如原文有配图可后续手动补传")
+
+    if suggestions:
+        print("\n💡 优化建议：")
+        for s in suggestions:
+            print(f"  • {s}")
+
+
+def _print_stats(content: str, article_name: str, images: list):
+    """打印内容统计信息"""
+    import re
+    annotation_blocks = len(re.findall(r'\{\{同人注释start\}\}', content))
+    chapters = len(re.findall(r'=== .+ ===', content))
+    chars = len(content)
+    print(f"\n📊 统计: 章节 {chapters} | 同人注释 {annotation_blocks} 块 | 总字符 {chars}")
+
+
+def cmd_review_info(args):
+    """显示待审阅项的详细信息"""
+    import re, os as _os
+
+    raw_file = args.file
+    if not _os.path.exists(raw_file):
+        print(f"错误：文件不存在 {raw_file}")
+        return
+
+    with open(raw_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    print(f"📄 文件: {raw_file}")
+    print(f"   大小: {_os.path.getsize(raw_file)} bytes")
+    print()
+
+    # 空 Infobox 字段
+    empty_fields = []
+    for field in ['地点', '涉及方面', '内容关键字', '图像']:
+        pattern = rf'\| {field} = (?:<!--[^>]*-->)?\s*$'
+        if re.search(pattern, content, re.MULTILINE):
+            empty_fields.append(field)
+    if empty_fields:
+        print(f"🔲 空白 Infobox 字段: {', '.join(empty_fields)}")
+
+    # 章节
+    chapters = re.findall(r'(?:第[一二三四五六七八九十百千]+章|序章|终章|尾声)[^\n]*', content)
+    if chapters:
+        print(f"\n📑 发现的章节标记 ({len(chapters)}):")
+        for c in chapters[:15]:
+            is_header = re.match(r'^=== .+ ===$', c.strip())
+            tag = '✅' if is_header else '  '
+            print(f"   {tag} {c.strip()[:50]}")
+
+    # 同人注释
+    annotations = re.findall(r'\{\{同人注释start\}\}', content)
+    print(f"\n💬 同人注释块: {len(annotations)}")
+
+    # 残留检查
+    residuals = re.findall(r'.*(?:发表于|本帖最后由).*', content)
+    if residuals:
+        print(f"\n⚠️  残留「发表于/本帖最后由」: {len(residuals)} 处")
+        for r in residuals[:5]:
+            print(f"   → {r.strip()[:80]}")
+
+    # 重复内容检查
+    lines = [l.strip() for l in content.split('\n') if len(l.strip()) > 30]
+    seen = {}
+    for i, line in enumerate(lines):
+        key = line[:100]
+        if key in seen:
+            print(f"\n🔁 疑似重复内容 (行 {seen[key]}, {i}): {key[:60]}...")
+        else:
+            seen[key] = i
+
+    print(f"\n💡 使用 review-article skill 进行交互式审阅优化")
 
 
 def cmd_fetch_images(args):
@@ -208,7 +376,7 @@ def cmd_update(args):
 
     # 生成更新版
     new_content = update_existing_wiki(existing_content, posts)
-    new_filepath = save_wiki_file(new_content, f"TID-{tid}-updated")
+    new_filepath = save_wiki_file(new_content, f"TID-{tid}-updated", tid=tid)
 
     print(f"\n原文件: {filepath}")
     print(f"新文件: {new_filepath}")
@@ -258,6 +426,10 @@ def main():
     p_fi = subparsers.add_parser("fetch-images", help="下载帖子图片")
     p_fi.add_argument("tid", type=int, help="帖子 TID")
 
+    # review-info
+    p_ri = subparsers.add_parser("review-info", help="显示待审阅项")
+    p_ri.add_argument("file", type=str, help=".raw.mw 文件路径")
+
     # update
     p_up = subparsers.add_parser("update", help="更新 Wiki 文章")
     p_up.add_argument("tid", type=int, help="帖子 TID")
@@ -278,6 +450,7 @@ def main():
         "list-updated": cmd_list_updated,
         "import": cmd_import,
         "fetch-images": cmd_fetch_images,
+        "review-info": cmd_review_info,
         "update": cmd_update,
     }
 

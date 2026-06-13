@@ -26,7 +26,7 @@ CONFIG = {
         "archiver_url_template": "https://lgqmonline.top/archiver/?tid-{tid}.html",
         "archiver_page_template": "https://lgqmonline.top/archiver/?tid-{tid}&page={page}.html",
         "cookie": os.environ.get("LGQM_COOKIE", _local.get("cookie", "")),
-        "request_interval": 0.5,  # 请求间隔秒数
+        "request_interval": 2.0,  # 请求间隔秒数
         "request_timeout": 30,
         "max_retries": 3,
     },
@@ -41,7 +41,6 @@ CONFIG = {
     "output": {
         "data_dir": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data'),
         "html_dir": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'html'),
-        "img_dir": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'img'),
         "output_dir": os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output'),
     },
     "auth": {
@@ -66,3 +65,33 @@ def get(key_path: str, default=None):
         if value is None:
             return default
     return value
+
+
+import re
+
+
+def _safe_name(name: str) -> str:
+    """清理目录名，移除不安全字符"""
+    return re.sub(r'[<>:"/\\|?*]', '_', name).strip()
+
+
+def tid_base_dir(tid: int, name: str = None) -> str:
+    """
+    获取 TID 的输出根目录。
+    - 有 name 时: output/{tid}-{safe_name}/
+    - 无 name 时: output/{tid}/
+    """
+    base = get("output.output_dir")
+    if name:
+        return os.path.join(base, f"{tid}-{_safe_name(name)}")
+    return os.path.join(base, str(tid))
+
+
+def tid_text_dir(tid: int, name: str = None) -> str:
+    """获取文本输出目录: output/{tid}-{name}/text/"""
+    return os.path.join(tid_base_dir(tid, name), "text")
+
+
+def tid_img_dir(tid: int, name: str = None) -> str:
+    """获取图片目录: output/{tid}-{name}/img/"""
+    return os.path.join(tid_base_dir(tid, name), "img")

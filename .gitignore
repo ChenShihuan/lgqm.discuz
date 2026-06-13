@@ -10,10 +10,7 @@ data/*.json
 # 下载的HTML页面
 html/
 
-# 下载的图片
-img/
-
-# 生成的输出文件
+# 生成的输出文件（含图片 img/ 子目录）
 output/
 
 # Python

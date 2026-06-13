@@ -7,14 +7,14 @@ import os
 from typing import List, Dict, Optional
 from datetime import datetime
 
-from .config import get
+from .config import get, tid_text_dir
 from .models import Post
 from .utils import log, slugify
 
 
 def html_to_wiki(html: str) -> str:
     """
-    将 Archiver HTML 内容转换为 MediaWiki 标记
+    将 HTML 内容转换为 MediaWiki 标记
 
     处理规则：
     - <br /> → 换行
@@ -27,6 +27,7 @@ def html_to_wiki(html: str) -> str:
     - &lt; → <
     - &gt; → >
     - &quot; → "
+    - 「XXX 发表于 YYYY-MM-DD HH:MM」行 → 删除
     """
     text = html
 
@@ -54,8 +55,64 @@ def html_to_wiki(html: str) -> str:
     # 段落：<p> → 双换行
     text = re.sub(r'</?p[^>]*>', '\n', text)
 
+    # 图片处理（在其他标签被删除之前）
+    # Discuz 附件图片：<img file="data/attachment/.../xxx.jpg" zoomfile="...">
+    # 转换为 MediaWiki: [[File:xxx.jpg|600px]]
+    def _img_replace(m):
+        # 优先取 file 属性，其次 zoomfile，其次 src
+        for g in m.groups():
+            if g:
+                src = g
+                break
+        else:
+            return ''
+        # 提取文件名
+        filename_match = re.search(r'([^/]+\.(?:gif|jpg|jpeg|png|svg))', src, re.IGNORECASE)
+        if filename_match:
+            filename = filename_match.group(1)
+            return f'\n[[File:{filename}|600px]]\n'
+        return ''
+    # <img file="...">  (Discuz 附件图片，含缩略信息)
+    text = re.sub(
+        r'<img[^>]*\bfile="([^"]*)"[^>]*>',
+        _img_replace,
+        text
+    )
+    # <img zoomfile="..."> (Discuz 附件图片另一种形式)
+    text = re.sub(
+        r'<img[^>]*\bzoomfile="([^"]*)"[^>]*>',
+        _img_replace,
+        text
+    )
+    # 常规 <img src="..."> (非 Discuz 附件图片，保留完整 URL)
+    text = re.sub(
+        r'<img[^>]*\bsrc="([^"]+)"[^>]*/?>',
+        r'\n[[Image:\1|class=img-responsive]]\n',
+        text
+    )
+
+    # 清理附件信息块：下载链接、上传时间、文件大小等
+    text = re.sub(r'\n\s*下载附件\s*\n', '', text)
+    text = re.sub(r'\n?\d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2} 上传\s*\n?', '', text)
+    # 附件文件名及大小行：如 "长江口.jpg (301.4 KB, 下载次数: 0)"
+    text = re.sub(r'\n?[^\s]+\.\w{3,4}\s*\([\d.]+\s*\w+B[^)]*\)\s*\n?', '', text)
+    # 清理 Discuz 附件下载链接（已被转成 [url text] 格式）
+    text = re.sub(r'\n?\[forum\.php\?mod=attachment[^\]]+\]\s*\n?', '', text)
+    # 清理附件 UI 残留文本
+    text = re.sub(r'\n?\([\d.]+\s*\w+B[^)]*\)\s*\n?', '', text)
+    # 清理 static/image/common/ 下的 UI 图标引用
+    text = re.sub(r'\n?\[\[Image:static/image/common/[^\]]+\]\]\s*\n?', '', text)
+
     # 删除其余 HTML 标签（span, div, font 等）
     text = re.sub(r'<[^>]+>', '', text)
+
+    # 清理「XXX 发表于 YYYY-MM-DD HH:MM」行
+    text = re.sub(r'\n\s*[^\s]+ 发表于 \d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2}\s*\n', '\n', text)
+    # 如果「发表于」在行首，去掉整行
+    text = re.sub(r'^[^\s]+ 发表于 \d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2}\s*\n?', '', text, flags=re.MULTILINE)
+
+    # 清理「本帖最后由 XXX 于 YYYY-MM-DD HH:MM 编辑」
+    text = re.sub(r'本帖最后由 [^\s]+ 于 \d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2} 编辑\s*', '', text)
 
     # 清理多余空白
     text = re.sub(r'\n{3,}', '\n\n', text)  # 最多连续两个换行
@@ -240,11 +297,28 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     else:
         parts.append("{{同人作品版权声明}}\n")
 
-    # 2. 转换每个楼层
+    # 2. 获取作者名（用于区分正文与回复）
+    thread_author = metadata.get("author", "") if metadata else ""
+
+    # 3. 转换每个楼层并去重
+    seen_content = set()  # 用于去除跨楼引用重复
     for post in posts:
         wiki_text = convert_post(post, config)
-        if wiki_text:
-            parts.append(wiki_text)
+        if not wiki_text:
+            continue
+
+        # 去重：跳过与前面楼层高度重复的内容（论坛引用导致）
+        text_normalized = wiki_text.strip()[:200]
+        if text_normalized and text_normalized in seen_content:
+            continue
+        if len(text_normalized) > 30:
+            seen_content.add(text_normalized)
+
+        # 非作者回复 → 用同人注释标签包裹
+        if not post.is_first_post and thread_author and post.author.strip() != thread_author.strip():
+            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+
+        parts.append(wiki_text)
 
     # 3. 结束标记
     parts.append("\n{{首行缩进end}}")
@@ -253,20 +327,25 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     return "\n\n".join(parts)
 
 
-def save_wiki_file(content: str, filename: str, output_dir: str = None) -> str:
+def save_wiki_file(content: str, filename: str, output_dir: str = None,
+                   tid: int = None) -> str:
     """
     保存 .mw 文件
 
     Args:
         content: Wiki 格式文本
         filename: 文件名（不含后缀）
-        output_dir: 输出目录
+        output_dir: 输出目录（优先于 tid）
+        tid: 帖子ID（自动使用 output/{tid}/text/ 目录）
 
     Returns:
         保存的完整文件路径
     """
     if output_dir is None:
-        output_dir = get("output.output_dir", "output")
+        if tid is not None:
+            output_dir = tid_text_dir(tid, filename)
+        else:
+            output_dir = get("output.output_dir", "output")
 
     os.makedirs(output_dir, exist_ok=True)
 
