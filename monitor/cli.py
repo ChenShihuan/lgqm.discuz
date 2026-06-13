@@ -433,7 +433,9 @@ def cmd_update(args):
 
     # 找到对应的 Wiki 文章
     articles = load_wiki_index()
-    matched = [a for a in articles if a.forum_tid == tid]
+    # 匹配 forum_tid 或 forum_tids 中任一 TID
+    matched = [a for a in articles
+               if a.forum_tid == tid or tid in (a.forum_tids or [])]
     if not matched:
         print(f"错误：未找到 TID={tid} 对应的 Wiki 文章")
         return
