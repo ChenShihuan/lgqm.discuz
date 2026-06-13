@@ -397,6 +397,17 @@ def update_existing_wiki(existing_content: str, new_posts: List[Post],
             infobox
         )
 
+    # 获取作者名（从 Infobox 或首楼）
+    thread_author = ""
+    author_match = re.search(r'\|\s*官方论坛\s*=\s*<!--[^>]*-->\s*(\S+)', infobox)
+    if not author_match:
+        author_match = re.search(r'\|\s*官方论坛\s*=\s*(\S+)', infobox)
+    if author_match:
+        thread_author = author_match.group(1).strip()
+    if not thread_author and new_posts:
+        first = next((p for p in new_posts if p.is_first_post), new_posts[0])
+        thread_author = first.author.strip()
+
     # 转换新内容
     config = {
         "auto_title": 0,
@@ -406,11 +417,25 @@ def update_existing_wiki(existing_content: str, new_posts: List[Post],
         "split_line": False,
     }
 
+    seen = set()
     parts = [infobox.strip()]
     for post in new_posts:
         wiki_text = convert_post(post, config)
-        if wiki_text:
-            parts.append(wiki_text)
+        if not wiki_text:
+            continue
+
+        # 去重
+        norm = wiki_text.strip()[:200]
+        if norm and norm in seen:
+            continue
+        if len(norm) > 30:
+            seen.add(norm)
+
+        # 非作者回复包裹同人注释
+        if not post.is_first_post and thread_author and post.author.strip() != thread_author:
+            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+
+        parts.append(wiki_text)
 
     parts.append("\n{{首行缩进end}}")
     parts.append("[[分类:同人作品]]")
