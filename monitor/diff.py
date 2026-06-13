@@ -1,13 +1,14 @@
 """
 差异对比引擎 - 对比论坛帖子列表与 Wiki 文章索引，发现新帖和更新
 """
+import re
 import requests
 from datetime import datetime
 from typing import List, Dict, Optional
 
 from .config import get
 from .models import ForumThread, WikiArticle, DiffItem, DiffReport
-from .utils import log, parse_datetime, set_verbose
+from .utils import log, parse_datetime, set_verbose, normalize_title
 
 
 def detect_diffs(
@@ -229,6 +230,159 @@ def verify_possible_matches(report: DiffReport, verbose: bool = False) -> DiffRe
         log(f"验证完成：{', '.join(parts)}", "SUCCESS")
 
     return report
+
+
+def title_match_articles(
+    threads: List[ForumThread],
+    wiki_articles: List[WikiArticle],
+    verbose: bool = False,
+) -> List[dict]:
+    """
+    基于标准化标题匹配论坛帖子与 Wiki 文章。
+    用于发现搬运文章（早期发布于其他渠道，论坛上线后搬运，标题一致）。
+
+    匹配条件：
+    - Wiki 文章的 forum_tid 为 None（尚未关联论坛帖）
+    - 论坛帖与 Wiki 文章的 normalize_title 后完全相同
+
+    Returns:
+        [{forum_thread, wiki_article, forum_title_norm, wiki_title_norm}]
+    """
+    set_verbose(verbose)
+
+    # 筛选未关联论坛的 Wiki 文章
+    orphan_articles = [a for a in wiki_articles if a.forum_tid is None]
+    log(f"标题匹配：Wiki 未关联文章 {len(orphan_articles)} 篇，论坛帖 {len(threads)} 篇", "INFO")
+
+    # 构建标准化 Wiki 标题索引
+    wiki_by_title: Dict[str, List[WikiArticle]] = {}
+    for article in orphan_articles:
+        norm = normalize_title(article.title)
+        if norm:
+            wiki_by_title.setdefault(norm, []).append(article)
+
+    # 标准化论坛标题并匹配
+    matches = []
+    for thread in threads:
+        norm = normalize_title(thread.title)
+        if not norm:
+            continue
+        candidates = wiki_by_title.get(norm, [])
+        for article in candidates:
+            matches.append({
+                "forum_thread": thread,
+                "wiki_article": article,
+                "forum_title_norm": norm,
+                "wiki_title_norm": normalize_title(article.title),
+            })
+
+    log(f"标题匹配完成：发现 {len(matches)} 组搬运文章", "SUCCESS" if matches else "INFO")
+    return matches
+
+
+def apply_title_matches(
+    matches: List[dict],
+    wiki_repo_path: str = None,
+    data_dir: str = None,
+    dry_run: bool = False,
+) -> dict:
+    """
+    将标题匹配结果应用：更新 .mw Infobox 和 wiki_index
+
+    Args:
+        matches: title_match_articles 的返回值
+        wiki_repo_path: Wiki 仓库路径
+        data_dir: data 目录路径
+        dry_run: 仅预览
+
+    Returns:
+        {total, updated_mw, updated_index}
+    """
+    import os as _os
+    import json as _json
+
+    if wiki_repo_path is None:
+        wiki_repo_path = get("wiki.repo_path")
+    if data_dir is None:
+        data_dir = get("output.data_dir")
+
+    updated_mw = 0
+    updated_index = 0
+
+    # 读取现有 wiki_index
+    index_path = _os.path.join(data_dir, "wiki_index.json")
+    wiki_index = {}
+    if _os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            wiki_index = _json.load(f)
+
+    articles_list = wiki_index.get("articles", [])
+    articles_by_filename = {a.get("filename", ""): a for a in articles_list}
+
+    for m in matches:
+        thread = m["forum_thread"]
+        article = m["wiki_article"]
+        forum_url = thread.url or f"https://lgqmonline.top/thread-{thread.tid}-1-1.html"
+        forum_link = f"[{forum_url} {thread.title}]"
+
+        # 更新 .mw 文件 Infobox
+        mw_path = _os.path.join(wiki_repo_path, article.filename)
+        if _os.path.exists(mw_path):
+            with open(mw_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # 检查是否已有 forum_url
+            if article.forum_url:
+                log(f"  跳过 {article.filename}: 已有论坛链接", "WARN")
+                continue
+
+            # 在 官坛原帖 字段填入
+            new_content = content
+            if "| 官坛原帖 =" in content or "| 官坛原帖=" in content:
+                new_content = re.sub(
+                    r'\| 官坛原帖\s*=.*',
+                    f'| 官坛原帖 = {forum_link}',
+                    content
+                )
+            elif "| 首次发布" in content:
+                # 字段不存在，插入在「首次发布」之前
+                new_content = content.replace(
+                    "| 首次发布",
+                    f"| 官方论坛 = {article.author}\n| 官坛原帖 = {forum_link}\n| 首次发布"
+                )
+            elif "| 最近更新" in content:
+                new_content = content.replace(
+                    "| 最近更新",
+                    f"| 官方论坛 = {article.author}\n| 官坛原帖 = {forum_link}\n| 最近更新"
+                )
+            else:
+                log(f"  ⚠️ {article.filename}: 无法定位插入点", "WARN")
+                continue
+
+            if not dry_run:
+                with open(mw_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+            updated_mw += 1
+            log(f"  ✅ {article.filename} → {forum_url}", "INFO")
+
+            # 更新 wiki_index 内存中的条目
+            if article.filename in articles_by_filename:
+                articles_by_filename[article.filename]["forum_url"] = forum_url
+                articles_by_filename[article.filename]["forum_tid"] = thread.tid
+                updated_index += 1
+
+    # 写回 wiki_index
+    if updated_index > 0 and not dry_run:
+        wiki_index["articles"] = list(articles_by_filename.values())
+        wiki_index["total"] = len(wiki_index["articles"])
+        with open(index_path, "w", encoding="utf-8") as f:
+            _json.dump(wiki_index, f, ensure_ascii=False, indent=2)
+
+    return {
+        "total": len(matches),
+        "updated_mw": updated_mw,
+        "updated_index": updated_index,
+    }
 
 
 def _check_update(thread: ForumThread, article: WikiArticle) -> Optional[str]:

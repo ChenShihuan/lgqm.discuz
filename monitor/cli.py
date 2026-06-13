@@ -369,6 +369,51 @@ def cmd_renumber_list(args):
         print("\n✅ 列表序号已校正")
 
 
+def cmd_match_titles(args):
+    """基于标题匹配搬运文章"""
+    from monitor.monitor import scan_board, save_threads_index
+    from monitor.indexer import scan_wiki_articles
+    from monitor.diff import title_match_articles, apply_title_matches
+    import os as _os
+
+    print("--- 加载数据 ---")
+    print("扫描论坛帖子...")
+    threads = scan_board(mode="full", verbose=False)
+    print(f"  {len(threads)} 篇")
+
+    print("索引 Wiki 文章...")
+    articles = scan_wiki_articles()
+    orphan = sum(1 for a in articles if a.forum_tid is None)
+    print(f"  {len(articles)} 篇 (其中 {orphan} 篇未关联论坛)")
+
+    print("\n--- 标题匹配 ---")
+    matches = title_match_articles(threads, articles, verbose=True)
+    if not matches:
+        print("未发现匹配的搬运文章")
+        return
+
+    print(f"\n发现 {len(matches)} 组搬运文章匹配：")
+    for i, m in enumerate(matches, 1):
+        t = m["forum_thread"]
+        a = m["wiki_article"]
+        print(f"  {i:>3}. [{t.tid}] {t.title[:50]}")
+        print(f"       Wiki: {a.filename}  (论坛: {m['forum_title_norm']} = Wiki: {m['wiki_title_norm']})")
+
+    if args.dry_run:
+        print(f"\n⚠️  --dry-run 模式，未修改文件。添加 --apply 以实际更新。")
+        return
+
+    if not args.apply:
+        print(f"\n💡 使用 --apply 以实际更新 .mw 文件和 wiki_index")
+        return
+
+    print("\n--- 应用更新 ---")
+    data_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "data")
+    result = apply_title_matches(matches, data_dir=data_dir, dry_run=False)
+    print(f"  .mw 更新: {result['updated_mw']} 篇")
+    print(f"  wiki_index 更新: {result['updated_index']} 条")
+
+
 def cmd_webui(args):
     """启动本地看板服务器"""
     import sys, os
@@ -502,6 +547,11 @@ def main():
     p_wb = subparsers.add_parser("webui", help="启动本地看板服务器")
     p_wb.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
 
+    # match-titles
+    p_mt = subparsers.add_parser("match-titles", help="标题匹配搬运文章")
+    p_mt.add_argument("--dry-run", action="store_true", help="仅预览匹配结果")
+    p_mt.add_argument("--apply", action="store_true", help="实际更新 .mw 和索引")
+
     # renumber-list
     p_rl = subparsers.add_parser("renumber-list", help="校正同人作品列表序号")
     p_rl.add_argument("--dry-run", action="store_true", help="仅预览，不实际修改")
@@ -525,6 +575,7 @@ def main():
         "review-info": cmd_review_info,
         "update": cmd_update,
         "renumber-list": cmd_renumber_list,
+        "match-titles": cmd_match_titles,
         "webui": cmd_webui,
     }
 

@@ -139,6 +139,34 @@ def slugify(title: str) -> str:
     return title.strip()
 
 
+def normalize_title(title: str) -> str:
+    """
+    标准化标题用于匹配比较。
+    去除前缀标签（【原创】等）、日期/更新后缀、空白差异。
+    用于搬运文章标题匹配。
+    """
+    name = title.strip()
+
+    # 去掉前缀标签：【原创】【半原创】【同人】【完结】【转正】等
+    name = re.sub(r'^[【\[「〈][^】\]」〉]*[】\]」〉]\s*', '', name)
+
+    # 去掉日期/更新后缀：XX.XX.XX更新、5.14更新、更新至XX章
+    name = re.sub(r'\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至第?\w+章)?$', '', name)
+    name = re.sub(r'\s*\d+年\d+月\d+日\s*(?:更新|彩蛋|尾声).*$', '', name)
+    name = re.sub(r'\s*更新至第?\w+章$', '', name)
+
+    # 去掉末尾的章节号/节号
+    name = re.sub(r'\s+第[\d一二三四五六七八九十]+[章节].*$', '', name)
+
+    # 全角/半角标点统一
+    name = name.replace('（', '(').replace('）', ')').replace('：', ':').replace('，', ',')
+
+    # 多余空白归一化
+    name = re.sub(r'\s+', ' ', name).strip()
+
+    return name
+
+
 def clean_html(text: str) -> str:
     """基础 HTML 清理：去除 script/style 标签"""
     text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
