@@ -100,8 +100,8 @@ def html_to_wiki(html: str) -> str:
     text = re.sub(r'\n?\[forum\.php\?mod=attachment[^\]]+\]\s*\n?', '', text)
     # 清理附件 UI 残留文本
     text = re.sub(r'\n?\([\d.]+\s*\w+B[^)]*\)\s*\n?', '', text)
-    # 清理 static/image/common/ 下的 UI 图标引用
-    text = re.sub(r'\n?\[\[Image:static/image/common/[^\]]+\]\]\s*\n?', '', text)
+    # 清理 static/image/ 下的 UI 图标/表情引用（非文章配图）
+    text = re.sub(r'\n?\[\[Image:static/image/(?:common|smiley)/[^\]]+\]\]\s*\n?', '', text)
 
     # 删除其余 HTML 标签（span, div, font 等）
     text = re.sub(r'<[^>]+>', '', text)
