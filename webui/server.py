@@ -6,20 +6,48 @@ import os
 import json
 import http.server
 import urllib.parse
+import requests
 
 WEBUI_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(WEBUI_DIR)
 DATA_DIR = os.path.join(PROJECT_DIR, "data")
 REPORT_PATH = os.path.join(DATA_DIR, "diff_report.json")
 
+FORUM_BASE = "https://lgqmonline.top"
+
+# 缓存 auth cookie 和 headers
+_auth_headers = None
+
+
+def _get_auth_headers() -> dict:
+    """获取带论坛登录 cookie 的请求头"""
+    global _auth_headers
+    if _auth_headers is None:
+        import sys
+        sys.path.insert(0, PROJECT_DIR)
+        from monitor.auth import get_cookie
+        cookie = get_cookie()
+        _auth_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Accept-Encoding": "identity",
+        }
+        if cookie:
+            _auth_headers["Cookie"] = cookie
+    return _auth_headers.copy()
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
-    """静态文件 + API 路由"""
+    """静态文件 + API 路由 + 论坛代理"""
 
     def do_GET(self):
-        path = urllib.parse.urlparse(self.path).path
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
 
-        if path.startswith("/api/"):
+        if path.startswith("/proxy/"):
+            self._handle_proxy(parsed)
+        elif path.startswith("/api/"):
             self._handle_api("GET", path)
         else:
             self._serve_static(path)
@@ -76,6 +104,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
         self.wfile.write(json.dumps(body, ensure_ascii=False).encode("utf-8"))
+
+    def _handle_proxy(self, parsed):
+        """论坛代理：转发请求到论坛并附带登录 cookie"""
+        # /proxy/thread-22085-1-1.html → https://lgqmonline.top/thread-22085-1-1.html
+        target_path = parsed.path[len("/proxy"):]
+        if parsed.query:
+            target_url = f"{FORUM_BASE}{target_path}?{parsed.query}"
+        else:
+            target_url = f"{FORUM_BASE}{target_path}"
+
+        try:
+            resp = requests.get(target_url, headers=_get_auth_headers(), timeout=30, allow_redirects=True)
+        except Exception as e:
+            self.send_error(502, f"代理请求失败: {e}")
+            return
+
+        # 跳过 Discuz JS challenge 页面
+        content = resp.text
+        if len(content) < 5000 and content.count("<script") >= 2:
+            content = (
+                "<html><body style='font-family:sans-serif;padding:2em'>"
+                "<h2>论坛需要 JavaScript 验证</h2>"
+                "<p>请先在浏览器中直接访问一次论坛完成验证，之后代理即可正常工作。</p>"
+                f"<p><a href='{target_url}' target='_blank'>打开论坛原页面</a></p>"
+                "</body></html>"
+            )
+
+        content_type = resp.headers.get("Content-Type", "text/html")
+        if "charset" not in content_type:
+            # Discuz 默认 utf-8
+            content = content.encode(resp.encoding or "utf-8")
+
+        self.send_response(resp.status_code)
+        self.send_header("Content-Type", content_type)
+        self.end_headers()
+        if isinstance(content, str):
+            self.wfile.write(content.encode("utf-8"))
+        else:
+            self.wfile.write(content)
 
     def log_message(self, format, *args):
         pass  # 静默日志

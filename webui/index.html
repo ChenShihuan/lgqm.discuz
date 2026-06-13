@@ -140,7 +140,7 @@ function render(){
     h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{};
-      h+=`<tr><td><a href="${t.url}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${w.last_update||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td><small>${i.reason||''}</small></td>
         <td><button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button></td></tr>`;
@@ -149,7 +149,7 @@ function render(){
     h='<table><tr><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{};
-      h+=`<tr><td><a href="${t.url}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td>${t.is_newcomer?'<span class="tag tag-new">新人</span>':''}</td>
         <td><button class="btn" style="background:#e8f0fe;color:#1967d2;padding:3px 10px;font-size:12px" onclick="doImport(${t.tid})">导入</button></td></tr>`;
@@ -159,7 +159,7 @@ function render(){
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{};
       const vs=i.verified,vt=vs===true?'<span class="tag tag-ok">可达</span>':vs===false?'<span class="tag tag-fail">不可达</span>':'<span class="tag">未验证</span>';
-      h+=`<tr><td><a href="${t.url||'#'}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td>
+      h+=`<tr><td><a href="${proxyUrl(t.url||'')}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td>
         <td>${esc(w.title||'-')}</td><td>${w.filename||'-'}</td>
         <td>${((i.confidence||0)*100).toFixed(0)}%</td><td>${vt}</td><td><small>${i.reason||''}</small></td></tr>`;
     }
@@ -179,6 +179,7 @@ function render(){
   document.getElementById('pager').innerHTML=ph;
 }
 function go(p){pg=p;render();window.scrollTo(0,300)}
+function proxyUrl(url){if(!url)return'#';return'/proxy'+new URL(url).pathname}
 function esc(s){if(!s)return'';const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function fmt(n){return n?n.toLocaleString():'0'}
 
