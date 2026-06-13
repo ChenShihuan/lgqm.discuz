@@ -76,29 +76,44 @@ def parse_infobox_fields(text: str) -> Dict[str, str]:
 
 def extract_forum_url(field_value: str) -> Optional[str]:
     """从字段值中提取第一个论坛 URL"""
-    if not field_value:
-        return None
+    urls = extract_all_forum_urls(field_value)
+    return urls[0] if urls else None
 
-    # 先去掉 HTML/MediaWiki 注释
+
+def extract_all_forum_urls(field_value: str) -> list:
+    """从字段值中提取所有论坛 URL（支持跨行多链接）"""
+    if not field_value:
+        return []
+
     clean = re.sub(r'<!--.*?-->', '', field_value).strip()
     if not clean:
-        return None
+        return []
 
-    # 格式1: [https://url 名称] → 提取 url
-    link_match = LINK_URL_PATTERN.search(clean)
-    if link_match:
-        url = link_match.group(1)
+    urls = []
+    # 提取所有 [url name] 格式的链接
+    for m in LINK_URL_PATTERN.finditer(clean):
+        url = m.group(1)
         if any(kw in url for kw in FORUM_URL_KEYWORDS):
-            return url
+            urls.append(url)
 
-    # 格式2: 裸 URL（不以 [ 开头）
-    raw_match = RAW_URL_PATTERN.search(clean)
-    if raw_match:
-        url = raw_match.group(1)
-        if any(kw in url for kw in FORUM_URL_KEYWORDS):
-            return url
+    # 也提取裸 URL
+    for m in RAW_URL_PATTERN.finditer(clean):
+        url = m.group(1)
+        if any(kw in url for kw in FORUM_URL_KEYWORDS) and url not in urls:
+            urls.append(url)
 
-    return None
+    return urls
+
+
+def extract_all_tids(field_value: str) -> list:
+    """从字段值中提取所有 TID"""
+    from .utils import extract_tid
+    tids = []
+    for url in extract_all_forum_urls(field_value):
+        tid = extract_tid(url)
+        if tid is not None and tid not in tids:
+            tids.append(tid)
+    return tids
 
 
 def scan_wiki_articles(repo_path: str = None, verbose: bool = False) -> List[WikiArticle]:
@@ -151,11 +166,13 @@ def scan_wiki_articles(repo_path: str = None, verbose: bool = False) -> List[Wik
         # 提取论坛链接
         forum_url = ""
         forum_tid = None
+        forum_tids = []
         raw_url = fields.get(forum_link_field, "")
-        extracted = extract_forum_url(raw_url)
-        if extracted:
-            forum_url = extracted
-            forum_tid = extract_tid(extracted)
+        all_urls = extract_all_forum_urls(raw_url)
+        if all_urls:
+            forum_url = all_urls[0]
+            forum_tid = extract_tid(forum_url)
+            forum_tids = extract_all_tids(raw_url)
 
         # 提取标题（去掉 .mw 后缀）
         title = filename[:-3]
@@ -165,6 +182,7 @@ def scan_wiki_articles(repo_path: str = None, verbose: bool = False) -> List[Wik
             title=title,
             forum_url=forum_url,
             forum_tid=forum_tid,
+            forum_tids=forum_tids,
             first_publish=fields.get(first_publish_field, ""),
             last_update=fields.get(last_update_field, ""),
             is_completed=fields.get("完结情况", ""),
@@ -192,6 +210,7 @@ def save_wiki_index(articles: List[WikiArticle], filepath: str = None):
                 "title": a.title,
                 "forum_url": a.forum_url,
                 "forum_tid": a.forum_tid,
+                "forum_tids": a.forum_tids if a.forum_tids else [],
                 "first_publish": a.first_publish,
                 "last_update": a.last_update,
                 "is_completed": a.is_completed,
@@ -222,6 +241,7 @@ def load_wiki_index(filepath: str = None) -> List[WikiArticle]:
             title=item["title"],
             forum_url=item.get("forum_url", ""),
             forum_tid=item.get("forum_tid"),
+            forum_tids=item.get("forum_tids", []),
             first_publish=item.get("first_publish", ""),
             last_update=item.get("last_update", ""),
             is_completed=item.get("is_completed", ""),
@@ -231,9 +251,13 @@ def load_wiki_index(filepath: str = None) -> List[WikiArticle]:
 
 
 def build_tid_index(articles: List[WikiArticle]) -> Dict[int, WikiArticle]:
-    """构建 TID → WikiArticle 的快速查找字典"""
+    """构建 TID → WikiArticle 的快速查找字典（含跨行多 TID）"""
     index = {}
     for article in articles:
-        if article.forum_tid is not None:
-            index[article.forum_tid] = article
+        tids = article.forum_tids if article.forum_tids else []
+        if article.forum_tid is not None and article.forum_tid not in tids:
+            tids.append(article.forum_tid)
+        for tid in tids:
+            if tid not in index:
+                index[tid] = article
     return index

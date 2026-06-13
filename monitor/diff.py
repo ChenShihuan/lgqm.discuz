@@ -34,8 +34,12 @@ def detect_diffs(
     if tid_index is None:
         tid_index = {}
         for article in wiki_articles:
-            if article.forum_tid is not None:
-                tid_index[article.forum_tid] = article
+            tids = article.forum_tids if article.forum_tids else []
+            if article.forum_tid is not None and article.forum_tid not in tids:
+                tids.append(article.forum_tid)
+            for tid in tids:
+                if tid not in tid_index:
+                    tid_index[tid] = article
 
     report = DiffReport()
     report.scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

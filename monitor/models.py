@@ -46,11 +46,18 @@ class WikiArticle:
     filename: str               # .mw 文件名
     title: str                  # 文章标题
     forum_url: str = ""         # 关联的论坛URL（官坛原帖）
-    forum_tid: Optional[int] = None  # 提取的帖子TID
+    forum_tid: Optional[int] = None  # 提取的帖子TID（主）
+    forum_tids: list = None     # 提取的所有TID（含跨行多链接）
     first_publish: str = ""     # 首次发布日期
     last_update: str = ""       # 最近更新日期（Wiki侧）
     is_completed: str = ""      # 完结情况：未完结/完结
     author: str = ""            # 作者
+
+    def __post_init__(self):
+        if self.forum_tids is None:
+            self.forum_tids = []
+        if self.forum_tid is not None and self.forum_tid not in self.forum_tids:
+            self.forum_tids.append(self.forum_tid)
 
 
 @dataclass
