@@ -27,8 +27,12 @@ CONFIG = {
         "archiver_page_template": "https://lgqmonline.top/archiver/?tid-{tid}&page={page}.html",
         "cookie": os.environ.get("LGQM_COOKIE", _local.get("cookie", "")),
         "request_interval": 2.0,  # 请求间隔秒数
+        "request_jitter": 0.3,  # 请求间隔随机抖动（±30%）
+        "board_page_interval": 1.5,  # 板块翻页间隔秒数
+        "board_page_jitter": 0.2,  # 板块翻页抖动
         "request_timeout": 30,
         "max_retries": 3,
+        "login_verify_url": "https://lgqmonline.top/home.php?mod=spacecp",  # 登录验证轻量端点
     },
     "wiki": {
         "repo_path": os.path.join(os.path.dirname(os.path.dirname(__file__)), "lgqm.huijiwiki.com"),

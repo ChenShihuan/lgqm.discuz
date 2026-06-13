@@ -26,3 +26,4 @@ data/local.json
 # IDE
 .vscode/
 .idea/
+data/cookies.pkl

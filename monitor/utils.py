@@ -4,6 +4,7 @@
 import re
 import sys
 import time
+import random
 from datetime import datetime
 from typing import Optional, List
 from urllib.parse import urlparse, parse_qs
@@ -200,9 +201,15 @@ def log(msg: str, level: str = "INFO"):
 
 # ============ HTTP 工具 ============
 
-def rate_limit(last_request_time: float, interval: float = 2.0):
-    """请求限速：确保两次请求间隔 >= interval 秒"""
+def rate_limit(last_request_time: float, interval: float = 2.0, jitter: float = 0.0):
+    """
+    请求限速：确保两次请求间隔 >= interval 秒。
+    jitter 参数添加随机抖动（如 0.3 = ±30%），避免机械式精确间隔。
+    """
     elapsed = time.time() - last_request_time
     if elapsed < interval:
         wait = interval - elapsed
+        if jitter > 0:
+            wait += random.uniform(-jitter * interval, jitter * interval)
+            wait = max(0.1, wait)  # 防止负值
         time.sleep(wait)

@@ -2,13 +2,13 @@
 差异对比引擎 - 对比论坛帖子列表与 Wiki 文章索引，发现新帖和更新
 """
 import re
-import requests
 from datetime import datetime
 from typing import List, Dict, Optional
 
 from .config import get
 from .models import ForumThread, WikiArticle, DiffItem, DiffReport
 from .utils import log, parse_datetime, set_verbose, normalize_title
+from .session import get_forum_session, BASE_URL
 
 
 def detect_diffs(
@@ -116,18 +116,13 @@ def verify_tid(tid: int, timeout: int = 10, use_auth: bool = True) -> bool:
     Returns:
         True 可访问, False 不可访问
     """
-    from .auth import get_cookie
+    fs = get_forum_session()
 
-    # 优先尝试 Archiver（公开板块，无需 cookie）
+    # 优先尝试 Archiver（公开板块，轻量）
     archiver_url = f"https://lgqmonline.top/archiver/?tid-{tid}.html"
     try:
-        resp = requests.get(
-            archiver_url,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=timeout,
-            allow_redirects=True,
-        )
-        if resp.status_code == 200:
+        resp = fs.get(archiver_url, referer=f"{BASE_URL}/", timeout=timeout)
+        if resp.status_code == 200 and not fs.is_js_challenge(resp.text):
             if 'class="author"' in resp.text or "class='author'" in resp.text:
                 return True
     except Exception:
@@ -136,22 +131,9 @@ def verify_tid(tid: int, timeout: int = 10, use_auth: bool = True) -> bool:
     # Archiver 不可达，尝试用 cookie 访问 thread 页面（非公开板块）
     if use_auth:
         thread_url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        }
-        cookie = get_cookie()
-        if cookie:
-            headers["Cookie"] = cookie
         try:
-            resp = requests.get(
-                thread_url,
-                headers=headers,
-                timeout=timeout,
-                allow_redirects=True,
-            )
-            if resp.status_code == 200:
+            resp = fs.get(thread_url, referer=f"{BASE_URL}/forum-39-1.html", timeout=timeout)
+            if resp.status_code == 200 and not fs.is_js_challenge(resp.text):
                 # 有作者信息或有帖子内容 → 可访问
                 if ('class="author"' in resp.text or "class='author'" in resp.text or
                         'class="authi"' in resp.text or 'class="pi"' in resp.text):
@@ -159,7 +141,7 @@ def verify_tid(tid: int, timeout: int = 10, use_auth: bool = True) -> bool:
                 # 是"提示信息"页面且无帖子内容 → 不可访问
                 if "提示信息" in resp.text or "未定义操作" in resp.text:
                     return False
-                # 非提示信息页面（可能是板块列表重定向等）→ 也算可访问
+                # 非提示信息页面 → 也算可访问
                 if "提示信息" not in resp.text:
                     return True
         except Exception:

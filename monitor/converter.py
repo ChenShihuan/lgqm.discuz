@@ -195,18 +195,23 @@ def generate_infobox(metadata: dict) -> str:
     title = metadata.get("title", "{{PAGENAME}}")
     author = metadata.get("author", "")
     forum_url = metadata.get("forum_url", "")
-    post_date = metadata.get("post_date", datetime.now().strftime("%Y-%m-%d"))
+    # 日期处理：首次发布取首楼日期，最近更新取最新作者章节日期
+    for date_key in ("first_publish_date", "last_update_date", "post_date"):
+        if date_key not in metadata:
+            metadata[date_key] = datetime.now().strftime("%Y-%m-%d")
+        raw = metadata[date_key]
+        if isinstance(raw, str):
+            dm = re.match(r'(\d{4})-(\d{1,2})-(\d{1,2})', raw)
+            if dm:
+                y, m, d = dm.groups()
+                metadata[date_key] = f"{y}-{int(m):02d}-{int(d):02d}"
+            else:
+                metadata[date_key] = datetime.now().strftime("%Y-%m-%d")
+
+    first_publish = metadata["first_publish_date"]
+    last_update = metadata["last_update_date"]
     tid = metadata.get("tid", "")
     thread_name = metadata.get("title", "")
-
-    # 格式化日期
-    if isinstance(post_date, str):
-        date_match = re.match(r'(\d{4})-(\d{1,2})-(\d{1,2})', post_date)
-        if date_match:
-            y, m, d = date_match.groups()
-            post_date = f"{y}-{int(m):02d}-{int(d):02d}"
-        else:
-            post_date = datetime.now().strftime("%Y-%m-%d")
 
     # 构建论坛链接
     if forum_url and thread_name:
@@ -247,8 +252,8 @@ def generate_infobox(metadata: dict) -> str:
     lines.append(f"| 其他网站 = ")
     lines.append(f"| 其他 = ")
     lines.append(f"")
-    lines.append(f"| 首次发布 = <!-- XXXX-XX-XX 不足补零 -->{post_date}")
-    lines.append(f"| 最近更新 = <!-- XXXX-XX-XX 不足补零 -->{post_date}")
+    lines.append(f"| 首次发布 = <!-- XXXX-XX-XX 不足补零 -->{first_publish}")
+    lines.append(f"| 最近更新 = <!-- XXXX-XX-XX 不足补零 -->{last_update}")
     lines.append(f"")
     lines.append(f"| 地点 = ")
     lines.append(f"| 涉及方面 = <!--非必须。使用中文顿号，即退格号下面的按键「、」作为分隔符-->")
@@ -265,6 +270,45 @@ def generate_infobox(metadata: dict) -> str:
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _convert_reply(html: str) -> str:
+    """
+    将楼主回复其他网友的 HTML 转换为同人注释格式：
+
+        {{同人注释start}}
+        引用者: 引用的内容
+        — 楼主的回复内容
+        {{同人注释end}}
+    """
+    import re as _re
+
+    bq_match = _re.search(r'<blockquote>(.*?)</blockquote>', html, re.DOTALL)
+    if not bq_match:
+        return html_to_wiki(html)
+
+    bq_inner = bq_match.group(1)
+    reply_html = html[bq_match.end():]
+
+    # 提取引用者名字
+    name_match = _re.search(r'<a[^>]*>([^<]+)</a>', bq_inner)
+    quoter = name_match.group(1).strip() if name_match else ""
+
+    # 去掉引用内的署名行（XXX 发表于 ...）
+    bq_clean = _re.sub(r'<font[^>]*>.*?</font>', '', bq_inner, flags=_re.DOTALL)
+
+    quoted = html_to_wiki(bq_clean).strip()
+    reply = html_to_wiki(reply_html).strip()
+
+    parts = []
+    if quoter:
+        parts.append(f"{quoter}: {quoted}" if quoted else f"{quoter}")
+    elif quoted:
+        parts.append(quoted)
+    if reply:
+        parts.append(f"— {reply}")
+
+    return "\n".join(parts)
 
 
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
@@ -291,21 +335,67 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
 
     parts = []
 
-    # 1. Infobox 头部
+    # 1. 确定作者名（用于区分正文与回复）
+    thread_author = metadata.get("author", "") if metadata else ""
+
+    # 2. 预扫描：收集首楼日期和最新作者章节日期（Infobox 生成之前）
+    first_post_date = ""
+    last_author_chapter_date = ""
+    for post in posts:
+        if post.is_first_post and post.date:
+            first_post_date = post.date
+        is_author = thread_author and post.author.strip() == thread_author.strip()
+        if not post.is_first_post and is_author and post.content_html:
+            is_author_reply = '<blockquote>' in post.content_html
+            # 只有非回复的楼主正文帖（>=200 字）才算章节更新日期
+            if not is_author_reply and len(post.content_html) >= 200 and post.date:
+                last_author_chapter_date = post.date
+    if metadata:
+        if first_post_date:
+            metadata["first_publish_date"] = first_post_date
+        if last_author_chapter_date:
+            metadata["last_update_date"] = last_author_chapter_date
+        elif first_post_date:
+            metadata["last_update_date"] = first_post_date
+
+    # 3. Infobox 头部（此时日期已正确设置）
     if metadata:
         parts.append(generate_infobox(metadata))
     else:
         parts.append("{{同人作品版权声明}}\n")
 
-    # 2. 获取作者名（用于区分正文与回复）
-    thread_author = metadata.get("author", "") if metadata else ""
-
-    # 3. 转换每个楼层并去重
+    # 4. 转换每个楼层并去重
     seen_content = set()  # 用于去除跨楼引用重复
     for post in posts:
         wiki_text = convert_post(post, config)
         if not wiki_text:
             continue
+
+        is_author = thread_author and post.author.strip() == thread_author.strip()
+        raw_html = post.content_html or ""
+
+        # 楼主回复检测：内容中包含 <blockquote> 表示是回复其他网友
+        is_author_reply = is_author and not post.is_first_post and '<blockquote>' in raw_html
+
+        if is_author_reply:
+            # 楼主回复 → 同人注释（引用+回复 格式）
+            wiki_text = _convert_reply(raw_html)
+            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+        elif is_author and not post.is_first_post:
+            # 楼主纯内容帖：>=200 字视为章节，<200 字视为短注
+            if len(wiki_text) >= 200:
+                # 作者章节：首行作为标题
+                lines = wiki_text.split('\n', 1)
+                first_line = lines[0].strip()
+                if first_line and len(first_line) < 120:
+                    rest = lines[1].strip() if len(lines) > 1 else ""
+                    wiki_text = f"== {first_line} ==\n\n{rest}"
+            else:
+                # 短内容 → 同人注释
+                wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+        elif not post.is_first_post and not is_author:
+            # 其他网友回复 → 同人注释
+            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
 
         # 去重：跳过与前面楼层高度重复的内容（论坛引用导致）
         text_normalized = wiki_text.strip()[:200]
@@ -314,13 +404,9 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
         if len(text_normalized) > 30:
             seen_content.add(text_normalized)
 
-        # 非作者回复 → 用同人注释标签包裹
-        if not post.is_first_post and thread_author and post.author.strip() != thread_author.strip():
-            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
-
         parts.append(wiki_text)
 
-    # 3. 结束标记
+    # 5. 结束标记
     parts.append("\n{{首行缩进end}}")
     parts.append("[[分类:同人作品]]")
 

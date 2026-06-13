@@ -5,13 +5,13 @@ Archiver 模式优势：极简 HTML、无需 cookie、函数式接口
 import re
 import os
 import time
-import requests
 from typing import List, Optional
 
 from .config import get, tid_img_dir
 from .models import Post, ForumThread
 from .utils import log, rate_limit, set_verbose, clean_html
-from .auth import get_cookie
+from .session import get_forum_session, BASE_URL
+from .pw_fetcher import pw_get_html
 
 
 # Archiver URL 模板
@@ -28,18 +28,6 @@ AUTHOR_PATTERN = re.compile(
 # 分页链接正则
 PAGE_LINK_PATTERN = re.compile(r'<a href="\?tid-\d+\.html&page=(\d+)">(\d+)</a>')
 
-
-def _make_headers() -> dict:
-    """构建 HTTP 请求头"""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    }
-    cookie = get_cookie()
-    if cookie:
-        headers["Cookie"] = cookie
-    return headers
 
 
 def fetch_archiver_page(tid: int, page: int = 1, retries: int = 3) -> Optional[str]:
@@ -59,15 +47,18 @@ def fetch_archiver_page(tid: int, page: int = 1, retries: int = 3) -> Optional[s
     else:
         url = ARCHIVER_PAGE_URL.format(tid=tid, page=page)
 
+    fs = get_forum_session()
+    fs.ensure_logged_in()
+    referer = f"{BASE_URL}/forum-39-1.html"  # Archiver 访问也伪装从板块列表进入
+
     for attempt in range(retries):
         try:
-            resp = requests.get(
-                url,
-                headers=_make_headers(),
-                timeout=get("forum.request_timeout", 30)
-            )
+            resp = fs.get(url, referer=referer)
             resp.encoding = 'utf-8'
             if resp.status_code == 200:
+                if fs.is_js_challenge(resp.text):
+                    log(f"Archiver tid={tid} 遇到 JS 验证", "WARN")
+                    return None
                 return resp.text
             log(f"HTTP {resp.status_code} for archiver tid={tid} page={page}", "WARN")
         except Exception as e:
@@ -167,21 +158,18 @@ def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
     set_verbose(verbose)
     log(f"开始拉取帖子 TID={tid} (常规页面模式)...", "INFO")
 
-    # 优先使用常规页面（需要 cookie）
     posts = _fetch_thread_regular(tid, verbose=verbose)
 
-    # 常规页面失败时回退到 Archiver
     if len(posts) == 0:
-        log("常规页面模式返回 0 楼，尝试 Archiver 模式...", "WARN")
-        posts = _fetch_thread_archiver(tid, verbose=verbose)
+        log("常规页面模式返回 0 楼（Archiver 回退已禁用——Archiver 不含图片，不适用于文章拉取）", "ERROR")
 
-    log(f"拉取完成：共 {len(posts)} 楼", "SUCCESS")
+    log(f"拉取完成：共 {len(posts)} 楼", "SUCCESS" if posts else "WARN")
     return posts
 
 
 def get_thread_title(tid: int) -> str:
     """
-    从常规页面提取帖子标题（需要 cookie）
+    从常规页面提取帖子标题
 
     Args:
         tid: 帖子ID
@@ -194,21 +182,13 @@ def get_thread_title(tid: int) -> str:
     except ImportError:
         return ""
 
-    url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
+    fs = get_forum_session()
+    fs.ensure_logged_in()
+
     try:
-        resp = requests.get(
-            url, headers=_make_headers(),
-            timeout=get("forum.request_timeout", 30)
-        )
-        resp.encoding = "utf-8"
-        if resp.status_code != 200:
-            return ""
-
-        # 检查 JS challenge
-        if len(resp.text) < 5000 and resp.text.count("<script") >= 2:
-            return ""
-
-        tree = etree.HTML(resp.text)
+        url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
+        html = pw_get_html(url, timeout=15000)
+        tree = etree.HTML(html)
 
         # 标题：<span id="thread_subject"> 或 <h1> 或 <title>
         for xpath in [
@@ -269,38 +249,37 @@ def _fetch_thread_archiver(tid: int, verbose: bool = False) -> List[Post]:
 
 
 def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
-    """通过常规页面拉取帖子（需要 cookie，适用于反爬保护下的回退）"""
+    """通过常规页面拉取帖子（使用 ForumSession，含完整浏览器指纹 + Referer 链）"""
     try:
         from lxml import etree
     except ImportError:
         log("常规页面模式需要 lxml: pip install lxml", "ERROR")
         return []
 
+    # 确保已登录（cookie 会注入 Playwright）
+    fs = get_forum_session()
+    fs.ensure_logged_in()
+
     all_posts_data = []
     page = 1
+    interval = get("forum.request_interval", 2.0)
+    jitter = get("forum.request_jitter", 0.3)
+    last_req = 0.0
 
     while True:
         url = f"https://lgqmonline.top/thread-{tid}-{page}-1.html"
+
+        if page > 1:
+            rate_limit(last_req, interval, jitter)
+
         try:
-            resp = requests.get(
-                url, headers=_make_headers(),
-                timeout=get("forum.request_timeout", 30)
-            )
-            resp.encoding = "utf-8"
+            html = pw_get_html(url)
+            last_req = time.time()
         except Exception as e:
-            log(f"第 {page} 页请求失败: {e}", "WARN")
+            log(f"第 {page} 页 Playwright 请求失败: {e}", "WARN")
             break
 
-        if resp.status_code != 200:
-            log(f"第 {page} 页 HTTP {resp.status_code}", "WARN")
-            break
-
-        # 检查 JS challenge
-        if len(resp.text) < 5000 and resp.text.count("<script") >= 2:
-            log("遇到反爬 JS 验证，请稍后重试", "ERROR")
-            break
-
-        tree = etree.HTML(resp.text)
+        tree = etree.HTML(html)
         post_tables = tree.xpath('//table[contains(@id, "pid")]')
         if not post_tables:
             break
@@ -315,7 +294,7 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
                 a_tag = auth_elem[0].find(".//a")
                 author = a_tag.text.strip() if a_tag is not None and a_tag.text else ""
 
-            # 日期：authi 里的 <em> 或 <span>
+            # 日期：authi 里的 <em> 或 <span>；或 <em id="authorposton...">
             date = ""
             if auth_elem:
                 em_tag = auth_elem[0].find(".//em")
@@ -325,12 +304,16 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
                     span_tag = auth_elem[0].find(".//span")
                     if span_tag is not None:
                         date = (span_tag.text or "").strip() or (span_tag.get("title") or "")
+            # Playwright 渲染下日期在 <em id="authorposton...">
+            if not date:
+                poston = table.xpath('.//em[contains(@id, "authorposton")]')
+                if poston and poston[0].text:
+                    date = poston[0].text.strip().lstrip("发表于 ")
 
             # 内容（含附件图片）
             t_fsz = table.xpath('.//div[contains(@class,"t_fsz")]')
             content_html = ""
             if t_fsz:
-                # 提取完整 t_fsz 内容（包含正文 td.t_f + 附件 div.pattl）
                 content_html = etree.tostring(t_fsz[0], encoding="unicode")
             else:
                 content_elem = table.xpath('.//td[contains(@class,"t_f")]')
@@ -347,14 +330,14 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
                 })
 
         if verbose:
-            log(f"第 {page}/{page} 页: {len(post_tables)} 楼", "INFO")
+            log(f"第 {page} 页: {len(post_tables)} 楼", "INFO")
 
         # 检查是否有下一页
         next_page = tree.xpath('//a[contains(@class,"nxt")]')
         if not next_page:
             break
+        prev_url = url  # 下一页的 Referer
         page += 1
-        time.sleep(1.0)
 
     posts = []
     for data in all_posts_data:
@@ -370,8 +353,9 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
 
 def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> List[dict]:
     """
-    从普通帖子页面拉取图片（需要 cookie 登录态）
-    Archiver 模式不含图片，需单独从常规页面提取
+    从普通帖子页面拉取图片。
+    页面请求使用 ForumSession（含完整浏览器指纹），
+    图片下载使用 get_image()（正确的图片请求头）。
 
     Args:
         tid: 帖子ID
@@ -394,24 +378,19 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
     log(f"获取帖子图片 (常规模式): {url}", "INFO")
 
     try:
-        from lxml import etree  # lxml 仅图片下载时需要，作为可选依赖
+        from lxml import etree
     except ImportError:
         log("图片下载需要 lxml 库: pip install lxml", "WARN")
         return images
 
+    fs = get_forum_session()
+    fs.ensure_logged_in()
+
     try:
-        resp = requests.get(
-            url,
-            headers=_make_headers(),
-            timeout=get("forum.request_timeout", 30)
-        )
-        resp.encoding = 'utf-8'
+        # 使用 Playwright 获取帖子页面 HTML（绕过 JS 挑战）
+        html = pw_get_html(url, timeout=30000)
 
-        if resp.status_code != 200:
-            log(f"获取帖子页面失败 HTTP {resp.status_code}", "WARN")
-            return images
-
-        tree = etree.HTML(resp.text)
+        tree = etree.HTML(html)
 
         # 查找 <img file="..."> 标签（Discuz 附件图片）
         img_elems = tree.findall('.//img[@file]')
@@ -436,14 +415,10 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
 
             local_path = os.path.join(output_dir, filename)
 
-            # 下载图片
+            # 下载图片（使用图片专用请求头）
             try:
                 rate_limit(time.time(), 1.0)
-                img_resp = requests.get(
-                    img_url,
-                    headers=_make_headers(),
-                    timeout=30
-                )
+                img_resp = fs.get_image(img_url, referer=url)
                 if img_resp.status_code == 200:
                     with open(local_path, 'wb') as f:
                         f.write(img_resp.content)
@@ -480,7 +455,7 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
 
                 try:
                     rate_limit(time.time(), 1.0)
-                    img_resp = requests.get(img_url, headers=_make_headers(), timeout=30)
+                    img_resp = fs.get_image(img_url, referer=url)
                     if img_resp.status_code == 200:
                         with open(local_path, 'wb') as f:
                             f.write(img_resp.content)

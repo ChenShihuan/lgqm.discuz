@@ -99,11 +99,11 @@ def append_article(article_name: str, author: str, keywords: str = "",
         award=award,
     )
 
-    # 在 |} 前插入新行
+    # 在 |} 前插入新行，前面加 |- 行分隔符
     if "|}" in content:
-        content = content.replace("|}", row + "\n|}")
+        content = content.replace("|}", "|-\n" + row + "\n|}")
     else:
-        content = content.rstrip() + "\n" + row + "\n|}"
+        content = content.rstrip() + "\n|-\n" + row + "\n|}"
 
     _write_list(content)
     return new_seq
@@ -234,33 +234,48 @@ def _parse_infobox(content: str) -> dict:
         "word_count": "",
     }
 
+    # 注意：使用 [ \t]* 避免跨行匹配；使用 [^\n]* 限制在同一行内
+    H = r'[ \t]*'  # 水平空白符
     patterns = {
-        "article_name": r'\|\s*同人作品\s*=\s*(.+)',
-        "keywords": r'\|\s*内容关键字\s*=\s*(.+)',
-        "first_publish": r'\|\s*首次发布\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)',
-        "last_update": r'\|\s*最近更新\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)',
-        "status": r'\|\s*完结情况\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)',
-        "canon_status": r'\|\s*转正状态\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)',
+        "article_name": rf'\|{H}同人作品{H}={H}([^\n]*)',
+        "keywords": rf'\|{H}内容关键字{H}={H}([^\n]*)',
+        "first_publish": rf'\|{H}首次发布{H}=[ \t]*(?:<!--[^>]*-->)?{H}(\S+)',
+        "last_update": rf'\|{H}最近更新{H}=[ \t]*(?:<!--[^>]*-->)?{H}(\S+)',
+        "status": rf'\|{H}完结情况{H}=[ \t]*(?:<!--[^>]*-->)?{H}([^\n]*)',
+        "canon_status": rf'\|{H}转正状态{H}=[ \t]*(?:<!--[^>]*-->)?{H}([^\n]*)',
     }
 
     for key, pattern in patterns.items():
         match = re.search(pattern, content)
         if match:
-            result[key] = match.group(1).strip()
+            raw = match.group(1).strip()
+            # 去除 HTML 注释
+            raw = re.sub(r'<!--.*?-->', '', raw).strip()
+            if raw:
+                result[key] = raw
 
     # 作者：从 官方论坛 字段提取
-    author_match = re.search(r'\|\s*官方论坛\s*=\s*(?:<!--[^>]*-->)?\s*(\S+)', content)
+    author_match = re.search(rf'\|{H}官方论坛{H}=[ \t]*(?:<!--[^>]*-->)?{H}(\S+)', content)
     if author_match:
-        result["author"] = author_match.group(1).strip()
+        raw = author_match.group(1).strip()
+        raw = re.sub(r'<!--.*?-->', '', raw).strip()
+        if raw:
+            result["author"] = raw
 
     # 地点 + 涉及方面合并为 location
-    loc_match = re.search(r'\|\s*地点\s*=\s*(.+)', content)
-    aspect_match = re.search(r'\|\s*涉及方面\s*=\s*(?:<!--[^>]*-->)?\s*(.+)', content)
+    loc_match = re.search(rf'\|{H}地点{H}={H}([^\n]*)', content)
+    aspect_match = re.search(rf'\|{H}涉及方面{H}=[ \t]*(?:<!--[^>]*-->)?{H}([^\n]*)', content)
     location_parts = []
     if loc_match:
-        location_parts.append(loc_match.group(1).strip())
+        raw = loc_match.group(1).strip()
+        raw = re.sub(r'<!--.*?-->', '', raw).strip()
+        if raw:
+            location_parts.append(raw)
     if aspect_match:
-        location_parts.append(aspect_match.group(1).strip())
+        raw = aspect_match.group(1).strip()
+        raw = re.sub(r'<!--.*?-->', '', raw).strip()
+        if raw:
+            location_parts.append(raw)
     result["location"] = "、".join(location_parts)
 
     # 清理 article_name（去除 {{PAGENAME}} 占位符）

@@ -3,7 +3,7 @@
 """
 import re
 import json
-import requests
+import time
 from datetime import datetime
 from typing import List, Optional
 try:
@@ -13,32 +13,28 @@ except ImportError:
 
 from .config import get
 from .models import ForumThread
-from .utils import log, set_verbose
-from .auth import get_cookie
+from .utils import log, set_verbose, rate_limit
+from .session import get_forum_session, BASE_URL
 
 
-def fetch_page(url: str, retries: int = 3) -> Optional[etree.HTML]:
-    """获取页面并解析为 HTML 树"""
+def fetch_page(url: str, referer: str = None, retries: int = 3) -> Optional[etree.HTML]:
+    """获取页面并解析为 HTML 树（通过 ForumSession，带完整浏览器指纹）"""
     if etree is None:
         log("lxml 未安装，无法解析 HTML。请 pip install lxml", "ERROR")
         return None
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    }
-    cookie = get_cookie()
-    if cookie:
-        headers["Cookie"] = cookie
+
+    fs = get_forum_session()
+    fs.ensure_logged_in()
 
     for attempt in range(retries):
         try:
-            resp = requests.get(
-                url, headers=headers,
-                timeout=get("forum.request_timeout", 30)
-            )
+            resp = fs.get(url, referer=referer)
             resp.encoding = 'utf-8'
             if resp.status_code == 200:
+                # JS 挑战检测
+                if fs.is_js_challenge(resp.text):
+                    log(f"遇到反爬 JS 验证: {url}", "ERROR")
+                    return None
                 return etree.HTML(resp.text)
             log(f"HTTP {resp.status_code} for {url}", "WARN")
         except Exception as e:
@@ -189,14 +185,24 @@ def scan_board(mode: str = "quick", verbose: bool = False) -> List[ForumThread]:
         scan_pages = actual_total
         log(f"📚 全量模式：扫描全部 {scan_pages} 页", "INFO")
 
-    # 逐页扫描（无延时——用户要求）
+    # 逐页扫描（带 Referer 链 + 翻页延迟 + 抖动）
+    last_req = 0.0
+    board_interval = get("forum.board_page_interval", 1.5)
+    board_jitter = get("forum.board_page_jitter", 0.2)
+    prev_url = f"{BASE_URL}/"  # 首页作为第一页的 Referer
+
     for page_num in range(1, scan_pages + 1):
         if page_num > 1:
-            url = get("forum.board_url_template").format(page=page_num)
-            tree = fetch_page(url)
-            if tree is None:
-                log(f"跳过第 {page_num} 页（获取失败）", "WARN")
-                continue
+            rate_limit(last_req, board_interval, board_jitter)
+
+        url = get("forum.board_url_template").format(page=page_num)
+        tree = fetch_page(url, referer=prev_url)
+        last_req = time.time()
+        prev_url = url  # 下一页的 Referer
+
+        if tree is None:
+            log(f"跳过第 {page_num} 页（获取失败）", "WARN")
+            continue
 
         # 解析帖子行
         tbodies = tree.xpath('.//tbody[starts-with(@id, "normalthread_") or starts-with(@id, "stickthread_")]')

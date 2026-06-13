@@ -6,7 +6,6 @@ import os
 import json
 import http.server
 import urllib.parse
-import requests
 
 WEBUI_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(WEBUI_DIR)
@@ -15,27 +14,15 @@ REPORT_PATH = os.path.join(DATA_DIR, "diff_report.json")
 
 FORUM_BASE = "https://lgqmonline.top"
 
-# 缓存 auth cookie 和 headers
-_auth_headers = None
 
-
-def _get_auth_headers() -> dict:
-    """获取带论坛登录 cookie 的请求头"""
-    global _auth_headers
-    if _auth_headers is None:
-        import sys
-        sys.path.insert(0, PROJECT_DIR)
-        from monitor.auth import get_cookie
-        cookie = get_cookie()
-        _auth_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-            "Accept-Encoding": "identity",
-        }
-        if cookie:
-            _auth_headers["Cookie"] = cookie
-    return _auth_headers.copy()
+def _get_forum_session():
+    """懒加载 ForumSession（含登录态 + 完整浏览器指纹）"""
+    import sys
+    sys.path.insert(0, PROJECT_DIR)
+    from monitor.session import get_forum_session
+    fs = get_forum_session()
+    fs.ensure_logged_in()
+    return fs
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -113,7 +100,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(body, ensure_ascii=False).encode("utf-8"))
 
     def _handle_proxy(self, parsed):
-        """论坛代理：转发请求到论坛并附带登录 cookie"""
+        """论坛代理：转发请求到论坛并附带登录态 + 完整浏览器指纹"""
         # /proxy/thread-22085-1-1.html → https://lgqmonline.top/thread-22085-1-1.html
         target_path = parsed.path[len("/proxy"):]
         if parsed.query:
@@ -122,14 +109,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             target_url = f"{FORUM_BASE}{target_path}"
 
         try:
-            resp = requests.get(target_url, headers=_get_auth_headers(), timeout=30, allow_redirects=True)
+            fs = _get_forum_session()
+            resp = fs.get(target_url, referer=f"{FORUM_BASE}/")
         except Exception as e:
             self.send_error(502, f"代理请求失败: {e}")
             return
 
         # 跳过 Discuz JS challenge 页面
         content = resp.text
-        if len(content) < 5000 and content.count("<script") >= 2:
+        if fs.is_js_challenge(content):
             content = (
                 "<html><body style='font-family:sans-serif;padding:2em'>"
                 "<h2>论坛需要 JavaScript 验证</h2>"
@@ -140,7 +128,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         content_type = resp.headers.get("Content-Type", "text/html")
         if "charset" not in content_type:
-            # Discuz 默认 utf-8
             content = content.encode(resp.encoding or "utf-8")
 
         self.send_response(resp.status_code)
