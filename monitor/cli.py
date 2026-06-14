@@ -161,6 +161,9 @@ def cmd_import(args):
 
     # 输出被合并/过滤的标题清单，供人工复核
     from monitor.converter import last_merged_titles
+    from monitor.converter import _last_toc_info as toc_info
+    if toc_info:
+        print(f"\n📋 主楼目录章节: {len(toc_info)} 个")
     if last_merged_titles:
         print(f"\n🔀 被过滤未设为章节的标题 ({len(last_merged_titles)} 条)：")
         for i, t in enumerate(last_merged_titles, 1):

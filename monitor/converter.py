@@ -11,8 +11,9 @@ from .config import get, tid_text_dir
 from .models import Post
 from .utils import log, slugify
 
-# 模块级变量：存储最近一次转换中被过滤的章节标题（供 CLI 输出复核清单）
+# 模块级变量：存储最近一次转换中被过滤的章节标题和 TOC 信息（供 CLI 输出复核清单）
 last_merged_titles = []
+_last_toc_info = {}
 
 
 def html_to_wiki(html: str) -> str:
@@ -384,6 +385,45 @@ def _is_chapter_start(first_line: str) -> bool:
     return False
 
 
+def _parse_toc(wikitext: str) -> dict:
+    """
+    从主楼 wikitext 中解析目录。
+    格式示例：
+        目录
+        [https://...pid=532627258&fromuid=8961 第一章 斜杠青年鹿文渊]
+        [https://...pid=532627260&fromuid=8961 第二章 黄骅的来信]
+
+    返回 {numeric_pid: chapter_name} 映射。
+    """
+    import re as _re
+    result = {}
+    # 找到"目录"到下一个空行/大标题之间的内容
+    toc_start = wikitext.find('目录')
+    if toc_start < 0:
+        return result
+    toc_chunk = wikitext[toc_start:toc_start + 5000]
+
+    # 匹配 [url pid=数字 章节名] 格式
+    links = _re.findall(
+        r'\[https?://[^\]\s]+pid=(\d+)[^\]\s]*\s+([^\]]+)\]',
+        toc_chunk
+    )
+    for pid, name in links:
+        result[pid] = name.strip()
+
+    # 匹配无 pid 的首章链接（指向主题帖本身，URL 中不含 pid=）
+    #   排除后续章节链接（URL 含 pid= 的是具体楼层）
+    first_chapter = _re.findall(
+        r'\[(https?://[^\]]*tid=\d+[^\]]*)\s+(第[一二三四五六七八九十百千]+章\s+[^\]]+)\]',
+        toc_chunk
+    )
+    for url, name in first_chapter:
+        if 'pid=' not in url:
+            result["_first_post"] = name.strip()
+            break  # 只要第一个
+    return result
+
+
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                             config: dict = None) -> str:
     """
@@ -457,6 +497,12 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 for r in refs:
                     cited_pids.add(r)
 
+    # 4.5. 解析主楼目录（如存在），建立 pid→章节名 映射
+    toc_chapters = {}  # {numeric_pid: chapter_name}
+    if posts and posts[0].content_html:
+        first_wikitext = html_to_wiki(posts[0].content_html)
+        toc_chapters = _parse_toc(first_wikitext)
+
     # 5. 第二轮：生成输出
     seen_content = set()  # 去重
     last_was_author_chapter = False  # 追踪连续作者帖
@@ -504,9 +550,17 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 first_line = lines[0].strip()
                 rest = lines[1].strip() if len(lines) > 1 else ""
                 # 判断是否应作为新章节
-                is_new_chapter = _is_chapter_start(first_line)
+                numeric_pid = post.pid.replace("pid", "") if post.pid else ""
+                toc_name = toc_chapters.get(numeric_pid, "")
+                is_new_chapter = _is_chapter_start(first_line) or bool(toc_name)
                 if is_new_chapter and first_line and len(first_line) < 120:
-                    wiki_text = f"== {first_line} ==\n\n{rest}"
+                    # 优先使用 TOC 中的章节名（匹配 pid）
+                    numeric_pid = post.pid.replace("pid", "") if post.pid else ""
+                    toc_name = toc_chapters.get(numeric_pid, "")
+                    if toc_name:
+                        wiki_text = f"== {toc_name} ==\n\n{rest}"
+                    else:
+                        wiki_text = f"== {first_line} ==\n\n{rest}"
                     last_was_author_chapter = True
                 elif last_was_author_chapter and parts:
                     # 连续作者帖 → 合并到上一个章节末尾
@@ -528,6 +582,25 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
             wiki_text = convert_post(post, config)
             if not wiki_text:
                 continue
+            # 如果有 TOC：给首楼加上章节标题，并删除目录文字
+            if toc_chapters:
+                # 去除"目录"及其后的链接列表（非正文内容）
+                toc_pos = wiki_text.find('目录')
+                if toc_pos >= 0:
+                    # 找到目录后第一个非链接行的位置
+                    toc_end = toc_pos
+                    for i, line in enumerate(wiki_text[toc_pos:].split('\n')):
+                        if i > 0 and line.strip() and not line.strip().startswith('['):
+                            toc_end = toc_pos + wiki_text[toc_pos:].find(line)
+                            break
+                    wiki_text = wiki_text[:toc_pos].rstrip() + "\n\n" + wiki_text[toc_end:].lstrip()
+
+            if "_first_post" in toc_chapters:
+                toc_name = toc_chapters["_first_post"]
+                lines = wiki_text.split('\n', 1)
+                body = lines[1].strip() if len(lines) > 1 else wiki_text
+                wiki_text = f"== {toc_name} ==\n\n{body}"
+                last_was_author_chapter = True
 
         # --- 读者帖：全部跳过 ---
         #   读者原帖已在作者回复 blockquote 中完整保留（含全文），
@@ -549,9 +622,10 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     parts.append("[[分类:同人作品]]")
 
     result = "\n\n".join(parts)
-    # 存储被合并标题供 CLI 输出复核提示
-    global last_merged_titles
+    # 存储被合并标题 + TOC 匹配信息供 CLI 输出复核
+    global last_merged_titles, _last_toc_info
     last_merged_titles = merged_titles
+    _last_toc_info = toc_chapters
     return result
 
 
