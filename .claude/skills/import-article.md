@@ -63,9 +63,9 @@ Converter 自动处理：
 # TARGET_DIR 为 TARGET 的父目录（如 output/22085-淞沪启明同人/）
 cp <TARGET_DIR>/text/<NAME>.mw lgqm.huijiwiki.com/
 cp <TARGET_DIR>/img/* lgqm.huijiwiki.com/ 2>/dev/null  # 如有图片
-cd lgqm.huijiwiki.com
-git add <NAME>.mw
-git commit -m "导入同人: <NAME>"
+# cd lgqm.huijiwiki.com
+# git add <NAME>.mw
+# git commit -m "导入同人: <NAME>"
 ```
 
 > **注意**: `TARGET_DIR` 为 `TARGET` 所在目录（`dirname TARGET`），内含 `text/` 和 `img/` 子目录。
