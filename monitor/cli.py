@@ -415,6 +415,27 @@ def cmd_preanalyze(args):
 level: 1=卷/案(顶层), 2=标准章节(默认), 3=子章节""")
 
 
+def cmd_img_sum(args):
+    """归集 output/*/img/ 下的图片到 output/img_sum/"""
+    import os, shutil
+    src = os.path.join(os.path.dirname(__file__), "..", "output")
+    dst = os.path.join(src, "img_sum")
+    os.makedirs(dst, exist_ok=True)
+
+    count = 0
+    for root, dirs, files in os.walk(src):
+        if root.endswith("/img") or root.endswith("\\img"):
+            for f in files:
+                src_file = os.path.join(root, f)
+                dst_file = os.path.join(dst, f)
+                if not os.path.exists(dst_file):
+                    shutil.copy2(src_file, dst_file)
+                    count += 1
+
+    total = len(os.listdir(dst))
+    print(f"已归集 {count} 张新图片，img_sum 共 {total} 张")
+
+
 def cmd_match_titles(args):
     """基于标题匹配搬运文章"""
     from monitor.monitor import scan_board, save_threads_index
@@ -637,6 +658,9 @@ def main():
     p_pa = subparsers.add_parser("preanalyze", help="预分析帖子目录结构")
     p_pa.add_argument("tid", type=int, help="帖子 TID")
 
+    # img-sum
+    p_is = subparsers.add_parser("img-sum", help="归集 output/*/img/ 图片到 output/img_sum/")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -659,6 +683,7 @@ def main():
         "match-titles": cmd_match_titles,
         "word-count": cmd_word_count,
         "preanalyze": cmd_preanalyze,
+        "img-sum": cmd_img_sum,
         "webui": cmd_webui,
     }
 
