@@ -234,15 +234,26 @@ def _clean_article_name(title: str) -> str:
     import re
     name = title.strip()
 
-    # 去掉前缀标签：【原创】、「同人」等
-    name = re.sub(r'^[【\[「〈](?:原创|同人|完结[了]?|转正)[】\]」〉]\s*', '', name)
+    # 循环去掉所有前缀标签（【】〖〗等），直到没有更多
+    # 处理连续标签：如 〖授权转载〗【原创】需逐轮剥离
+    while True:
+        old = name
+        name = re.sub(r'^[【\[「〈][^】\]」〉]+[】\]」〉]\s*', '', name)
+        name = re.sub(r'^[〖][^〗]+[〗]\s*', '', name)
+        if name == old:
+            break
 
     # 去掉日期/更新后缀：如 " XX.XX.XX更新"、" 5.14更新"、" 更新至XX章"
     name = re.sub(r'\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至第?\w+章)?$', '', name)
     name = re.sub(r'\s*\d+年\d+月\d+日\s*(?:更新|彩蛋|尾声).*$', '', name)
     name = re.sub(r'\s*更新至第?\w+章$', '', name)
 
-    # 去掉多余空格
+    # 去掉完结/连载状态后缀：（已完结）（完结）（连载中）（全文完）（未完待续）（更新中）
+    name = re.sub(r'\s*[（(](?:已?完结|连载中|全文完|未完待续|更新中)[）)]\s*$', '', name)
+
+    # 去掉书名号《》，保留内部文字（文件名不需要多余标点）
+    name = re.sub(r'[《》]', '', name)
+
     name = name.strip()
 
     return name if name else title.strip()
