@@ -360,8 +360,14 @@ def _is_chapter_start(first_line: str) -> bool:
     if line.startswith(('http://', 'https://', '[http')):
         return False
 
+    # 加粗/斜体标记包裹的标题：'''第四十三章 达摩克利斯之剑'''
+    #   去掉加粗标记后重新检查
+    stripped_bold = line.strip("'")
+    if stripped_bold != line and stripped_bold:
+        return _is_chapter_start(stripped_bold)
+
     # 规则 1: 以对话引导符开头 → 延续（非章节）
-    if line.startswith(('"', '"', '"', '「', '「', '"', "'", '“')):
+    if line.startswith(('"', '"', '"', '「', '「', '"', '“', '(')):
         return False
 
     # 规则 2: 超长标题（>50 字）→ 不是有意为之的章节标题
@@ -559,9 +565,13 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 toc_name = toc_chapters.get(numeric_pid, "")
                 is_new_chapter = _is_chapter_start(first_line) or bool(toc_name)
                 if is_new_chapter and first_line and len(first_line) < 120:
-                    # 优先使用 TOC 中的章节名（匹配 pid）
                     numeric_pid = post.pid.replace("pid", "") if post.pid else ""
                     toc_name = toc_chapters.get(numeric_pid, "")
+                    # 清理标题中的加粗/斜体标记
+                    clean_title = first_line.strip("'").strip()
+                    if clean_title != first_line:
+                        first_line = clean_title
+                    # 优先使用 TOC 中的章节名（匹配 pid）
                     if toc_name:
                         wiki_text = f"== {toc_name} ==\n\n{rest}"
                     else:
