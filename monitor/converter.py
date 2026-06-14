@@ -443,6 +443,8 @@ def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
       1. PID 直接匹配：entry["pid"] 去前缀后作为 key
       2. 楼层号匹配：entry["floor"] → 查找对应 Post 的 PID
       3. 纯名称：存为 "_name:章节名"（后续由 _is_chapter_start 模糊匹配）
+
+    返回值中额外包含 "_toc_source_floor": int | None，标记目录来源楼层（跳过该楼层）。
     """
     result = {}
     entries = toc_analysis.get("entries", [])
@@ -478,6 +480,11 @@ def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
         # 策略 3: 纯名称（无楼层/PID 对应）
         key = f"_name:{name}"
         result[key] = name
+
+    # 记录目录来源楼层（该楼层仅为 TOC，不应出现在正文中）
+    source_floor = toc_analysis.get("source_floor")
+    if source_floor is not None:
+        result["_toc_source_floor"] = int(source_floor)
 
     # 处理首章（TOC 第一个条目若指向首楼）
     if entries and toc_analysis.get("source_floor", 0) >= 0:
@@ -582,7 +589,12 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     seen_content = set()  # 去重
     last_was_author_chapter = False  # 追踪连续作者帖
     merged_titles = []  # 收集被合并的标题，供人工复核
+    toc_source_floor = toc_chapters.get("_toc_source_floor")
     for post in posts:
+        # 跳过 TOC 目录页（该楼层仅为目录，不应出现在正文中）
+        if toc_source_floor is not None and post.floor == toc_source_floor:
+            continue
+
         is_author = thread_author and post.author.strip() == thread_author.strip()
         raw_html = post.content_html or ""
         has_blockquote = '<blockquote>' in raw_html
@@ -652,9 +664,16 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                     merged_titles.append(first_line[:60])
                     last_was_author_chapter = False
             else:
-                # 短注 → 同人注释
-                wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
-                last_was_author_chapter = False
+                # 短文 → 检查 TOC 映射：若该 PID 在目录中是章节，也创建标题
+                numeric_pid = post.pid.replace("pid", "") if post.pid else ""
+                toc_name = toc_chapters.get(numeric_pid, "")
+                if toc_name:
+                    wiki_text = f"== {toc_name} ==\n\n{wiki_text}"
+                    last_was_author_chapter = True
+                else:
+                    # 短注 → 同人注释
+                    wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+                    last_was_author_chapter = False
 
         # --- 首楼 ---
         elif post.is_first_post:
@@ -704,7 +723,8 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     # 存储被合并标题 + TOC 匹配信息供 CLI 输出复核
     global last_merged_titles, _last_toc_info
     last_merged_titles = merged_titles
-    _last_toc_info = toc_chapters
+    _last_toc_info = {k: v for k, v in toc_chapters.items()
+                      if not k.startswith("_")}  # 排除内部标记（_toc_source_floor 等）
     return result
 
 
