@@ -194,7 +194,7 @@ function render(){
     h='<table><tr><th style="width:28px"><input type="checkbox" id="cbAll" onchange="toggleAll(this)" title="全选"></th><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{},inQ=QT.has(t.tid);
-      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_self">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${w.last_update||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td><small>${i.reason||''}</small></td>
         <td>
@@ -206,7 +206,7 @@ function render(){
     h='<table><tr><th style="width:28px"><input type="checkbox" id="cbAll" onchange="toggleAll(this)" title="全选"></th><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},inQ=QT.has(t.tid);
-      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_self">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td>${t.is_newcomer?'<span class="tag tag-new">新人</span>':''}</td>
         <td>
@@ -219,7 +219,7 @@ function render(){
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{};
       const vs=i.verified,vt=vs===true?'<span class="tag tag-ok">可达</span>':vs===false?'<span class="tag tag-fail">不可达</span>':'<span class="tag">未验证</span>';
-      h+=`<tr><td><a href="${proxyUrl(t.url||'')}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td>
+      h+=`<tr><td><a href="${proxyUrl(t.url||'')}" target="_self">${t.tid}</a></td><td>${esc(t.title)}</td>
         <td>${esc(w.title||'-')}</td><td>${w.filename||'-'}</td>
         <td>${((i.confidence||0)*100).toFixed(0)}%</td><td>${vt}</td><td><small>${i.reason||''}</small></td></tr>`;
     }
