@@ -56,8 +56,13 @@ def html_to_wiki(html: str) -> str:
     # 换行：<br /> 或 <br> → \n
     text = re.sub(r'<br\s*/?>', '\n', text)
 
-    # 段落：<p> → 双换行
+    # 段落：<p> → 换行
     text = re.sub(r'</?p[^>]*>', '\n', text)
+
+    # Div 标签 → 换行
+    # Discuz 使用 <div align="left"> 包裹每个段落，并非 <br> 或 <p>
+    # 需在标签删除前将 <div> 转为换行，否则段落会连成一片
+    text = re.sub(r'</?div[^>]*>', '\n', text)
 
     # 图片处理（在其他标签被删除之前）
     # Discuz 附件图片：<img file="data/attachment/.../xxx.jpg" zoomfile="...">
