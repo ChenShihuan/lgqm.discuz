@@ -336,6 +336,37 @@ def _should_keep_question(text: str) -> bool:
     return True
 
 
+def _is_chapter_start(first_line: str) -> bool:
+    """
+    判断作者帖首行是否是真章节标题（而非上一章的延续）。
+
+    返回 True 表示应创建新章节，False 表示应合并到上一章。
+    """
+    import re as _re
+    line = first_line.strip()
+
+    # 规则 1: 以对话引导符开头 → 延续（非章节）
+    if line.startswith(('"', '"', '"', '「', '「', '"', "'", '“')):
+        return False
+
+    # 规则 2: 超长标题（>50 字）→ 不是有意为之的章节标题
+    if len(line) > 50:
+        return False
+
+    # 规则 3: 简短有意标题（≤10 字，不含引号、逗号）→ 很可能是真章节
+    if len(line) <= 10:
+        if not _re.search(r'["「」"\'，,。.]', line):
+            if not line.endswith(('了', '在', '的', '呢', '吧', '啊')):
+                return True
+
+    # 规则 4: 日期格式开头 → 真章节
+    if _re.match(r'圣历|第[一二三四五六七八九十百千]+章|番外', line):
+        return True
+
+    # 默认：不确定，保守地视为章节（避免漏判真正的章节断裂点）
+    return True
+
+
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                             config: dict = None) -> str:
     """
@@ -411,6 +442,7 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
 
     # 5. 第二轮：生成输出
     seen_content = set()  # 去重
+    last_was_author_chapter = False  # 追踪连续作者帖
     for post in posts:
         is_author = thread_author and post.author.strip() == thread_author.strip()
         raw_html = post.content_html or ""
@@ -440,6 +472,7 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
             if qa_parts:
                 wiki_text = "\n\n---\n\n".join(qa_parts)
                 wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+                last_was_author_chapter = False  # 打断连续章节链
             else:
                 continue
 
@@ -449,15 +482,26 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
             if not wiki_text:
                 continue
             if len(wiki_text) >= 200:
-                # 章节：首行作为标题
                 lines = wiki_text.split('\n', 1)
                 first_line = lines[0].strip()
-                if first_line and len(first_line) < 120:
-                    rest = lines[1].strip() if len(lines) > 1 else ""
+                rest = lines[1].strip() if len(lines) > 1 else ""
+                # 判断是否应作为新章节
+                is_new_chapter = _is_chapter_start(first_line) and not last_was_author_chapter
+                if is_new_chapter and first_line and len(first_line) < 120:
                     wiki_text = f"== {first_line} ==\n\n{rest}"
+                    last_was_author_chapter = True
+                elif last_was_author_chapter and parts:
+                    # 连续作者帖 → 合并到上一个章节末尾
+                    parts[-1] = parts[-1].rstrip() + "\n\n" + wiki_text
+                    last_was_author_chapter = True
+                    continue
+                else:
+                    last_was_author_chapter = False
+                # else: 作为无标题正文保留（延续内容但没有上一章可合）
             else:
                 # 短注 → 同人注释
                 wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+                last_was_author_chapter = False
 
         # --- 首楼 ---
         elif post.is_first_post:
