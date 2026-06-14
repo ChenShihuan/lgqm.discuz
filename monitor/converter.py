@@ -414,9 +414,17 @@ def _parse_toc(wikitext: str) -> dict:
     """
     import re as _re
     result = {}
-    # 找到"目录"到下一个空行/大标题之间的内容
+    # 找到"目录"关键字，如无则回退扫描首楼全文中的 PID 链接
     toc_start = wikitext.find('目录')
     if toc_start < 0:
+        # 回退：首楼全文扫描，连续 3+ PID 链接 → 视作 TOC
+        all_links = _re.findall(
+            r'\[https?://[^\]\s]+pid=(\d+)[^\]\s]*\s+([^\]]+)\]',
+            wikitext[:5000]
+        )
+        if len(all_links) >= 3:
+            for pid, name in all_links:
+                result[pid] = name.strip()
         return result
     toc_chunk = wikitext[toc_start:toc_start + 5000]
 
