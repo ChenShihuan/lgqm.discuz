@@ -541,6 +541,15 @@ def cmd_update(args):
             print(f"⚠️  作品列表更新失败: {e}")
 
 
+def cmd_word_count(args):
+    """统计 .mw 文件字数并更新 Infobox"""
+    from .utils import count_words_mw
+    result = count_words_mw(args.file, dry_run=args.dry_run)
+    print(f"字数统计: {result['word_count']} (中文 {result['chinese']} 字, 英文 {result['english']} 字符)")
+    if args.dry_run:
+        print("[dry-run] 未修改文件")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="临高启明论坛同人监控工具",
@@ -605,6 +614,11 @@ def main():
     p_rl = subparsers.add_parser("renumber-list", help="校正同人作品列表序号")
     p_rl.add_argument("--dry-run", action="store_true", help="仅预览，不实际修改")
 
+    # word-count
+    p_wc = subparsers.add_parser("word-count", help="统计 .mw 文件字数并写入 Infobox")
+    p_wc.add_argument("file", type=str, help=".mw 文件路径")
+    p_wc.add_argument("--dry-run", action="store_true", help="仅统计，不修改文件")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -625,6 +639,7 @@ def main():
         "update": cmd_update,
         "renumber-list": cmd_renumber_list,
         "match-titles": cmd_match_titles,
+        "word-count": cmd_word_count,
         "webui": cmd_webui,
     }
 

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 
 from .config import get
+from .utils import count_words_mw
 
 
 def _list_path() -> str:
@@ -187,6 +188,13 @@ def update_from_mw_file(mw_path: str) -> tuple:
 
     if not article_name:
         raise ValueError("无法从 .mw 文件中提取文章名")
+
+    # 统计正文字数并写入作品列表（Infobox 保留 {{字数统计}} 模板）
+    try:
+        wc_result = count_words_mw(mw_path)
+        fields["word_count"] = wc_result["word_count"]
+    except Exception:
+        pass  # 字数统计失败不阻塞主流程
 
     action, seq = append_or_update(article_name, author, **fields)
     return (action, seq, article_name)

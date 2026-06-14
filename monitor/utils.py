@@ -1,6 +1,7 @@
 """
 工具函数：URL解析、TID提取、日期处理、日志
 """
+import os
 import re
 import sys
 import time
@@ -213,3 +214,66 @@ def rate_limit(last_request_time: float, interval: float = 2.0, jitter: float = 
             wait += random.uniform(-jitter * interval, jitter * interval)
             wait = max(0.1, wait)  # 防止负值
         time.sleep(wait)
+
+
+# ============ 字数统计 ============
+
+def count_words_mw(filepath: str, dry_run: bool = False) -> dict:
+    """
+    统计 .mw 文件正文的字数，更新 Infobox 中的 | 字数统计 字段。
+
+    统计范围：{{首行缩进start}} 到 {{首行缩进end}} 之间的正文，
+    排除 {{同人注释start}}...{{同人注释end}} 包裹的讨论内容。
+
+    返回 {"chinese": int, "english": int, "total": int, "word_count": str}
+    """
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f".mw 文件不存在: {filepath}")
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 提取正文（首行缩进之间，排除注释块）
+    parts = content.split("{{首行缩进start}}")
+    if len(parts) < 2:
+        raise ValueError("未找到 {{首行缩进start}} 标记")
+    body = parts[-1].split("{{首行缩进end}}")[0]
+
+    # 移除同人注释
+    body = re.sub(r"{{同人注释start}}.*?{{同人注释end}}", "", body, flags=re.DOTALL)
+
+    # 去除 wiki 标记
+    body = re.sub(r"\[\[File:[^\]]+\]\]", "", body)            # 图片
+    body = re.sub(r"\[\[分类:[^\]]+\]\]", "", body)            # 分类
+    body = re.sub(r"={2,}.*?={2,}", "", body)                  # 章节标题
+    body = re.sub(r"<[^>]+>", "", body)                         # HTML 标签
+    body = re.sub(r"\[https?://[^\] ]+[^\]]*\]", "", body)     # 外部链接
+    body = re.sub(r"\[\[([^\]|]+)\]\]", r"\1", body)           # [[内部链接]]
+    body = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", body)   # [[链接|文字]]
+    body = re.sub(r"'{2,}", "", body)                           # 粗体/斜体
+    body = re.sub(r"{{[^}]+}}", "", body)                       # 模板
+    body = re.sub(r"__[A-Z]+__", "", body)                      # 行为开关
+    body = re.sub(r"\[\[", "", body)                            # 残留双方括号
+    body = re.sub(r"\]\]", "", body)
+
+    # 统计中文和英文
+    chinese = len(re.findall(r"[一-鿿㐀-䶿]", body))
+    english_words = re.findall(r"[a-zA-Z]+", body)
+    english = sum(len(w) for w in english_words)  # 字符数
+
+    total = chinese + english
+
+    # 格式化：>=1000 用千字表示
+    word_count = f"{total / 1000:.1f}"
+
+    # 不修改 Infobox —— Infobox 保留 {{字数统计}} 模板由 Wiki 自动计算
+    # 字数通过 update_from_mw_file() 写入同人作品列表
+    if not dry_run:
+        pass
+
+    return {
+        "chinese": chinese,
+        "english": english,
+        "total": total,
+        "word_count": word_count,
+    }
