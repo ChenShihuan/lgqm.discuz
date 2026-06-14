@@ -321,7 +321,21 @@ class ForumSession:
 
     def is_js_challenge(self, text: str) -> bool:
         """检测响应是否是 JS 挑战页面"""
-        return len(text) < 5000 and text.count("<script") >= 2
+        if len(text) > 8000:
+            return False
+        if "<script" not in text:
+            return False
+        # 旧版挑战: 多个 script 标签
+        if text.count("<script") >= 2:
+            return True
+        # 新版挑战: 单 script，包含混淆的 location 跳转
+        if "location[" in text and ("href" in text or "assign" in text):
+            return True
+        if "location.href" in text or "location.assign" in text:
+            return True
+        if "location.replace" in text:
+            return True
+        return False
 
     @property
     def username(self) -> str:
