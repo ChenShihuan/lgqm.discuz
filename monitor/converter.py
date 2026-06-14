@@ -11,6 +11,9 @@ from .config import get, tid_text_dir
 from .models import Post
 from .utils import log, slugify
 
+# 模块级变量：存储最近一次转换中被过滤的章节标题（供 CLI 输出复核清单）
+last_merged_titles = []
+
 
 def html_to_wiki(html: str) -> str:
     """
@@ -362,11 +365,14 @@ def _is_chapter_start(first_line: str) -> bool:
     # 规则 3: 简短有意标题（≤10 字，不含引号、逗号）→ 很可能是真章节
     if len(line) <= 10:
         if not _re.search(r'["「」"\'，,。.]', line):
-            if not line.endswith(('了', '在', '的', '呢', '吧', '啊')):
+            if not line.endswith(('了', '呢', '吧', '啊')):
                 return True
 
-    # 规则 4: 日期/番外格式开头 → 真章节
+    # 规则 4: 日期/番外/带括号后缀 → 真章节
     if _re.match(r'圣历|第[一二三四五六七八九十百千]+章|番外', line):
+        return True
+    # 括号后缀通常是作者有意标注：（一）（上）（自封）（完）等
+    if _re.search(r'[（(][^）)]*[）)]', line) and len(line) <= 20:
         return True
 
     # 规则 5: 小说式场景设定开头 → 真章节
@@ -454,6 +460,7 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     # 5. 第二轮：生成输出
     seen_content = set()  # 去重
     last_was_author_chapter = False  # 追踪连续作者帖
+    merged_titles = []  # 收集被合并的标题，供人工复核
     for post in posts:
         is_author = thread_author and post.author.strip() == thread_author.strip()
         raw_html = post.content_html or ""
@@ -504,11 +511,13 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 elif last_was_author_chapter and parts:
                     # 连续作者帖 → 合并到上一个章节末尾
                     parts[-1] = parts[-1].rstrip() + "\n\n" + wiki_text
+                    merged_titles.append(first_line[:60])
                     last_was_author_chapter = True
                     continue
                 else:
+                    # 不是章节也不是合并 → 记录被过滤的标题
+                    merged_titles.append(first_line[:60])
                     last_was_author_chapter = False
-                # else: 作为无标题正文保留（延续内容但没有上一章可合）
             else:
                 # 短注 → 同人注释
                 wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
@@ -539,7 +548,11 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     parts.append("\n{{首行缩进end}}")
     parts.append("[[分类:同人作品]]")
 
-    return "\n\n".join(parts)
+    result = "\n\n".join(parts)
+    # 存储被合并标题供 CLI 输出复核提示
+    global last_merged_titles
+    last_merged_titles = merged_titles
+    return result
 
 
 def save_wiki_file(content: str, filename: str, output_dir: str = None,

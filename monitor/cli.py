@@ -159,6 +159,14 @@ def cmd_import(args):
     # Step 4: 转换为 Wiki 格式（原始版，不做任何替换）
     raw_content = convert_thread_to_wiki(posts, metadata=metadata)
 
+    # 输出被合并/过滤的标题清单，供人工复核
+    from monitor.converter import last_merged_titles
+    if last_merged_titles:
+        print(f"\n🔀 被过滤未设为章节的标题 ({len(last_merged_titles)} 条)：")
+        for i, t in enumerate(last_merged_titles, 1):
+            print(f"   {i:>3}. {t}")
+        print("   💡 如有意为之的章节标题，请在审阅时手动恢复为 == 标题 ==")
+
     # 保存原始版 (.raw.mw) — 供 review skill 使用
     safe_name = _sanitize_filename(article_name)
     from monitor.config import tid_text_dir, tid_img_dir
