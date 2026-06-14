@@ -143,7 +143,7 @@ def parse_archiver_posts(html: str) -> List[dict]:
     return posts
 
 
-def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
+def fetch_thread(tid: int, verbose: bool = False, max_floors: int = None) -> List[Post]:
     """
     拉取指定帖子的全部内容。
     优先使用常规页面（cookie 登录），失败时回退到 Archiver 模式。
@@ -151,6 +151,7 @@ def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
     Args:
         tid: 帖子ID
         verbose: 详细日志
+        max_floors: 最大拉取楼层数，None 表示不限
 
     Returns:
         Post 列表，按楼层顺序排列
@@ -158,7 +159,7 @@ def fetch_thread(tid: int, verbose: bool = False) -> List[Post]:
     set_verbose(verbose)
     log(f"开始拉取帖子 TID={tid} (常规页面模式)...", "INFO")
 
-    posts = _fetch_thread_regular(tid, verbose=verbose)
+    posts = _fetch_thread_regular(tid, verbose=verbose, max_floors=max_floors)
 
     if len(posts) == 0:
         log("常规页面模式返回 0 楼（Archiver 回退已禁用——Archiver 不含图片，不适用于文章拉取）", "ERROR")
@@ -248,7 +249,7 @@ def _fetch_thread_archiver(tid: int, verbose: bool = False) -> List[Post]:
     return posts
 
 
-def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
+def _fetch_thread_regular(tid: int, verbose: bool = False, max_floors: int = None) -> List[Post]:
     """通过常规页面拉取帖子（使用 ForumSession，含完整浏览器指纹 + Referer 链）"""
     try:
         from lxml import etree
@@ -335,6 +336,10 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
 
         if verbose:
             log(f"第 {page} 页: {len(post_tables)} 楼", "INFO")
+
+        # 达到最大楼层限制则停止翻页
+        if max_floors is not None and len(all_posts_data) >= max_floors:
+            break
 
         # 检查是否有下一页
         next_page = tree.xpath('//a[contains(@class,"nxt")]')

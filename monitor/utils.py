@@ -277,3 +277,38 @@ def count_words_mw(filepath: str, dry_run: bool = False) -> dict:
         "total": total,
         "word_count": word_count,
     }
+
+
+# ============ 文章名处理 ============
+
+def clean_article_name(title: str) -> str:
+    """从论坛帖子标题生成 Wiki 文章名（去除标签、日期后缀等）"""
+    name = title.strip()
+
+    # 循环去掉所有前缀标签（【】〖〗等）
+    while True:
+        old = name
+        name = re.sub(r'^[【\[「〈][^】\]」〉]+[】\]」〉]\s*', '', name)
+        name = re.sub(r'^[〖][^〗]+[〗]\s*', '', name)
+        if name == old:
+            break
+
+    # 去掉日期/更新后缀（括号包裹的优先处理）
+    # 如 "（26年4月6日更新至第42章）"、"（6.14更新"、"（0118 第42章 广州新城）"
+    name = re.sub(r'[（(]\s*\d+年\d+月\d+日\s*更新.*[）)]\s*$', '', name)
+    name = re.sub(r'[（(]\s*\d+年\d+月\d+日\s*(?:彩蛋|尾声).*[）)]\s*$', '', name)
+    name = re.sub(r'[（(]\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?[^）)]*$', '', name)
+    name = re.sub(r'[（(]\s*\d{4}\s*第\S+章.*[）)]\s*$', '', name)
+    # 如 " 1.15更新第八案"、" 6.14更新"、" 0118 第42章"
+    name = re.sub(r'\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至第?\w+章)?.*$', '', name)
+    name = re.sub(r'\s*\d+年\d+月\d+日\s*(?:更新|彩蛋|尾声).*$', '', name)
+    name = re.sub(r'\s*更新至第?\w+章$', '', name)
+
+    # 去掉完结/连载状态后缀
+    name = re.sub(r'\s*[（(](?:已?完结|连载中|全文完|未完待续|更新中)[）)]\s*$', '', name)
+
+    # 去掉书名号《》
+    name = re.sub(r'[《》]', '', name)
+    name = name.strip()
+
+    return name if name else title.strip()

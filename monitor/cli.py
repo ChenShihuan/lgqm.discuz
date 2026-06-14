@@ -124,8 +124,19 @@ def cmd_import(args):
     import re, os as _os
     from monitor.fetcher import fetch_thread, fetch_images, get_thread_title
     from monitor.converter import convert_thread_to_wiki, save_wiki_file
+    from monitor.utils import clean_article_name
 
     tid = args.tid
+
+    # Step 0: 加载外部 TOC 分析结果（如有）
+    toc_analysis = None
+    if args.toc_file:
+        from monitor.preanalyze import load_toc_analysis
+        toc_analysis = load_toc_analysis(args.toc_file)
+        if toc_analysis:
+            print(f"📋 使用预分析目录: {len(toc_analysis.get('entries', []))} 个章节")
+        else:
+            print("⚠️  TOC 文件加载失败，回退到默认章节检测")
 
     # Step 1: 拉取帖子
     posts = fetch_thread(tid, verbose=True)
@@ -138,7 +149,7 @@ def cmd_import(args):
     thread_title = get_thread_title(tid)
     if thread_title:
         # 清理标题：去前缀标签（【原创】等）、去日期后缀
-        article_name = _clean_article_name(thread_title)
+        article_name = clean_article_name(thread_title)
         print(f"\n📌 帖子标题: {thread_title}")
         print(f"📝 文章名称: {article_name}")
     else:
@@ -157,7 +168,7 @@ def cmd_import(args):
     }
 
     # Step 4: 转换为 Wiki 格式（原始版，不做任何替换）
-    raw_content = convert_thread_to_wiki(posts, metadata=metadata)
+    raw_content = convert_thread_to_wiki(posts, metadata=metadata, toc_analysis=toc_analysis)
 
     # 输出被合并/过滤的标题清单，供人工复核
     from monitor.converter import last_merged_titles
@@ -227,36 +238,6 @@ def cmd_import(args):
             print(f"✅ 作品列表已{action}: #{seq} [[{name}]]")
         except Exception as e:
             print(f"⚠️  作品列表更新失败: {e}")
-
-
-def _clean_article_name(title: str) -> str:
-    """从论坛帖子标题生成 Wiki 文章名"""
-    import re
-    name = title.strip()
-
-    # 循环去掉所有前缀标签（【】〖〗等），直到没有更多
-    # 处理连续标签：如 〖授权转载〗【原创】需逐轮剥离
-    while True:
-        old = name
-        name = re.sub(r'^[【\[「〈][^】\]」〉]+[】\]」〉]\s*', '', name)
-        name = re.sub(r'^[〖][^〗]+[〗]\s*', '', name)
-        if name == old:
-            break
-
-    # 去掉日期/更新后缀：如 " XX.XX.XX更新"、" 5.14更新"、" 更新至XX章"
-    name = re.sub(r'\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至第?\w+章)?$', '', name)
-    name = re.sub(r'\s*\d+年\d+月\d+日\s*(?:更新|彩蛋|尾声).*$', '', name)
-    name = re.sub(r'\s*更新至第?\w+章$', '', name)
-
-    # 去掉完结/连载状态后缀：（已完结）（完结）（连载中）（全文完）（未完待续）（更新中）
-    name = re.sub(r'\s*[（(](?:已?完结|连载中|全文完|未完待续|更新中)[）)]\s*$', '', name)
-
-    # 去掉书名号《》，保留内部文字（文件名不需要多余标点）
-    name = re.sub(r'[《》]', '', name)
-
-    name = name.strip()
-
-    return name if name else title.strip()
 
 
 def _sanitize_filename(name: str) -> str:
@@ -401,6 +382,36 @@ def cmd_renumber_list(args):
         print("\n⚠️  --dry-run 模式，未实际修改文件")
     else:
         print("\n✅ 列表序号已校正")
+
+
+def cmd_preanalyze(args):
+    """预分析帖子目录结构，供 AI 辅助判断章节"""
+    from monitor.preanalyze import run_preanalysis
+
+    tid = args.tid
+    result = run_preanalysis(tid)
+
+    if "error" in result:
+        print(f"❌ 错误: {result['error']}")
+        return
+
+    print(f"\n帖子标题: {result['thread_title']}")
+    print(f"文章名称: {result['article_name']}")
+    print(f"已拉取前 {result['floor_count']} 层楼")
+    print(f"\n📄 预分析文本: {result['text_path']}")
+    print(f"\n请 AI 分析此文件中的目录结构，结果保存为:")
+    print(f"  {result['toc_path']}")
+    print(f"\nTOC 分析 JSON 格式:")
+    print("""
+{
+  "thread_tid": <tid>,
+  "source_floor": <包含目录的楼层号>,
+  "format": "pid_links | freeform_list | numbered",
+  "entries": [
+    {"floor": 楼层号或null, "pid": "数字或null", "chapter_name": "章节名"},
+    ...
+  ]
+}""")
 
 
 def cmd_match_titles(args):
@@ -586,6 +597,8 @@ def main():
     p_im.add_argument("tid", type=int, help="帖子 TID")
     p_im.add_argument("--download-images", action="store_true", help="同时下载图片")
     p_im.add_argument("--update-list", action="store_true", help="更新同人作品列表")
+    p_im.add_argument("--toc-file", type=str, default=None,
+                      help="预分析的 TOC JSON 文件路径")
 
     # fetch-images
     p_fi = subparsers.add_parser("fetch-images", help="下载帖子图片")
@@ -619,6 +632,10 @@ def main():
     p_wc.add_argument("file", type=str, help=".mw 文件路径")
     p_wc.add_argument("--dry-run", action="store_true", help="仅统计，不修改文件")
 
+    # preanalyze
+    p_pa = subparsers.add_parser("preanalyze", help="预分析帖子目录结构")
+    p_pa.add_argument("tid", type=int, help="帖子 TID")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -640,6 +657,7 @@ def main():
         "renumber-list": cmd_renumber_list,
         "match-titles": cmd_match_titles,
         "word-count": cmd_word_count,
+        "preanalyze": cmd_preanalyze,
         "webui": cmd_webui,
     }
 

@@ -435,8 +435,65 @@ def _parse_toc(wikitext: str) -> dict:
     return result
 
 
+def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
+    """
+    将外部 TOC 分析结果（来自 AI preanalyze）转为内部格式 {numeric_pid: chapter_name}。
+
+    支持三种映射策略：
+      1. PID 直接匹配：entry["pid"] 去前缀后作为 key
+      2. 楼层号匹配：entry["floor"] → 查找对应 Post 的 PID
+      3. 纯名称：存为 "_name:章节名"（后续由 _is_chapter_start 模糊匹配）
+    """
+    result = {}
+    entries = toc_analysis.get("entries", [])
+    for entry in entries:
+        name = entry.get("chapter_name", "").strip()
+        if not name:
+            continue
+
+        pid = entry.get("pid", "")
+        floor = entry.get("floor")
+
+        # 策略 1: PID 直接匹配
+        if pid and pid.strip():
+            numeric_pid = pid.strip().replace("pid", "")
+            result[numeric_pid] = name
+            continue
+
+        # 策略 2: 楼层号 → PID
+        if floor is not None:
+            try:
+                floor_int = int(floor)
+            except (ValueError, TypeError):
+                floor_int = None
+            if floor_int is not None:
+                for p in posts:
+                    if p.floor == floor_int:
+                        numeric_pid = p.pid.replace("pid", "") if p.pid else ""
+                        if numeric_pid:
+                            result[numeric_pid] = name
+                        break
+                continue
+
+        # 策略 3: 纯名称（无楼层/PID 对应）
+        key = f"_name:{name}"
+        result[key] = name
+
+    # 处理首章（TOC 第一个条目若指向首楼）
+    if entries and toc_analysis.get("source_floor", 0) >= 0:
+        first = entries[0]
+        first_floor = first.get("floor")
+        if first_floor == 1 or (first_floor is None and not first.get("pid")):
+            name = first.get("chapter_name", "").strip()
+            if name and "_first_post" not in result:
+                result["_first_post"] = name
+
+    return result
+
+
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
-                            config: dict = None) -> str:
+                            config: dict = None,
+                            toc_analysis: dict = None) -> str:
     """
     将整个帖子的所有楼层转换为 Wiki 格式文本
 
@@ -444,6 +501,9 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
         posts: 楼层列表
         metadata: 帖子元数据（用于生成 Infobox）
         config: 转换配置
+        toc_analysis: 外部 TOC 分析结果（来自 preanalyze + AI 分析），
+                      格式: {"entries": [{"floor": int, "pid": str, "chapter_name": str}, ...]}
+                      若提供则优先使用；未提供则回退到首楼 _parse_toc()。
 
     Returns:
         完整的 MediaWiki 格式文本
@@ -508,9 +568,13 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 for r in refs:
                     cited_pids.add(r)
 
-    # 4.5. 解析主楼目录（如存在），建立 pid→章节名 映射
+    # 4.5. 解析目录（如存在），建立 pid→章节名 映射
     toc_chapters = {}  # {numeric_pid: chapter_name}
-    if posts and posts[0].content_html:
+    if toc_analysis:
+        # 优先使用外部 TOC 分析结果（来自 preanalyze + AI）
+        toc_chapters = _parse_toc_external(toc_analysis, posts)
+    elif posts and posts[0].content_html:
+        # 回退到首楼自动解析
         first_wikitext = html_to_wiki(posts[0].content_html)
         toc_chapters = _parse_toc(first_wikitext)
 
