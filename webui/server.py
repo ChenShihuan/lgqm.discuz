@@ -89,8 +89,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _handle_api(self, method, path):
         """API 路由分发"""
         from .api import router
+
+        # 读取 POST body
+        body_bytes = None
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > 0:
+            body_bytes = self.rfile.read(content_length)
+
         try:
-            status, body = router(method, path, REPORT_PATH, DATA_DIR)
+            status, body = router(method, path, REPORT_PATH, DATA_DIR, body_bytes)
         except Exception as e:
             status, body = 500, {"error": str(e)}
 

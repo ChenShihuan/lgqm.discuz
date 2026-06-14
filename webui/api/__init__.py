@@ -78,7 +78,8 @@ def _save_queue(data_dir: str, items: list):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def router(method: str, path: str, report_path: str, data_dir: str) -> tuple:
+def router(method: str, path: str, report_path: str, data_dir: str,
+           body_bytes: bytes = None) -> tuple:
     """API 路由分发，返回 (status_code, data_dict)"""
     # GET /api/report
     if method == "GET" and path == "/api/report":
@@ -130,6 +131,12 @@ def router(method: str, path: str, report_path: str, data_dir: str) -> tuple:
     if method == "POST" and path.startswith("/api/import/"):
         tid = int(path.rsplit("/", 1)[-1])
         return _run_import(tid)
+
+    # POST /api/preview — 渲染 wikitext 为 HTML
+    if method == "POST" and path == "/api/preview":
+        if body_bytes:
+            return _preview_wikitext(body_bytes.decode("utf-8"))
+        return 400, {"error": "请求体为空"}
 
     return 404, {"error": f"未知端点: {method} {path}"}
 
@@ -350,3 +357,39 @@ def _run_import(tid: int) -> tuple:
 
     threading.Thread(target=_import, daemon=True).start()
     return 202, {"message": f"导入 TID={tid} 已启动"}
+
+
+# ============================================================
+# Wiki 预览
+# ============================================================
+
+def _preview_wikitext(text: str) -> tuple:
+    """
+    通过灰机 Wiki API 渲染 wikitext 为 HTML 预览。
+    返回分离的 head（CSS/JS）和 body（正文 HTML），
+    前端用 iframe 完整渲染以正确显示 wiki 样式。
+    """
+    import sys, os as _os, re as _re
+    sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+    from monitor.pw_fetcher import pw_parse_wikitext
+
+    full_html = pw_parse_wikitext(text)
+    if not full_html:
+        return 502, {"error": "Wiki API 渲染失败，请稍后重试"}
+
+    # 分离 headhtml 和 body HTML
+    head = ""
+    body = full_html
+    head_match = _re.search(r'<head>(.*?)</head>', full_html, _re.DOTALL)
+    if head_match:
+        head = head_match.group(1)
+        body = full_html[full_html.find('<div class="mw-parser-output">'):]
+        if not body:
+            body = full_html
+
+    return 200, {
+        "head": head,
+        "body": body,
+        "full": full_html,
+        "length": len(full_html),
+    }

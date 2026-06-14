@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Wiki 预览</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; background: #f5f5f5; }
+.toolbar { display: flex; gap: 8px; padding: 6px 12px; background: #2c3e50; color: white; align-items: center; flex-shrink: 0; }
+.toolbar button { padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; background: #3498db; color: white; }
+.toolbar button:hover { background: #2980b9; }
+.toolbar button.loading { background: #95a5a6; }
+.toolbar .status { font-size: 12px; color: #bdc3c7; margin-left: auto; }
+.split { display: flex; flex: 1; overflow: hidden; }
+.editor, .preview { flex: 1; overflow: hidden; min-width: 0; }
+.editor { display: flex; flex-direction: column; }
+.editor textarea { flex: 1; width: 100%; border: none; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 13px; line-height: 1.5; resize: none; outline: none; background: #fff; padding: 12px; }
+.preview iframe { width: 100%; height: 100%; border: none; background: #fff; }
+.placeholder { display: flex; align-items: center; justify-content: center; height: 100%; text-align: center; color: #95a5a6; background: #fff; }
+.placeholder .icon { font-size: 48px; }
+.placeholder p { margin-top: 12px; font-size: 14px; }
+.placeholder kbd { background: #ecf0f1; padding: 2px 6px; border-radius: 3px; font-size: 12px; border: 1px solid #bdc3c7; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+    <button onclick="loadLocal()">📂 加载 .mw</button>
+    <button id="btnPreview" onclick="doPreview()">🔍 预览</button>
+    <span class="status" id="status">Ctrl+Enter 预览 | 支持 .mw / .raw.mw</span>
+    <input type="file" id="fileInput" accept=".mw,.raw.mw" style="display:none" onchange="handleFile(event)">
+</div>
+
+<div class="split">
+    <div class="editor">
+        <textarea id="editor" placeholder="在此粘贴 wikitext 内容，或点击「加载 .mw」从本地打开..."></textarea>
+    </div>
+    <div class="preview" id="previewContainer">
+        <div class="placeholder" id="placeholder">
+            <div><div class="icon">📄</div><p>点击 <b>🔍 预览</b> 查看渲染效果 &nbsp; <kbd>Ctrl</kbd>+<kbd>Enter</kbd></p></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function loadLocal() { document.getElementById("fileInput").click(); }
+
+function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        document.getElementById("editor").value = ev.target.result;
+        document.getElementById("status").textContent = file.name + " (" + (file.size/1024).toFixed(1) + " KB)";
+    };
+    reader.readAsText(file);
+}
+
+async function doPreview() {
+    const btn = document.getElementById("btnPreview");
+    const text = document.getElementById("editor").value.trim();
+    if (!text) return;
+
+    btn.textContent = "⏳ 渲染中...";
+    btn.classList.add("loading");
+    document.getElementById("status").textContent = "请求 Wiki API...";
+
+    try {
+        const resp = await fetch("/api/preview", { method: "POST", body: text });
+        const data = await resp.json();
+        if (data.full) {
+            const container = document.getElementById("previewContainer");
+            const ph = document.getElementById("placeholder");
+            if (ph) ph.remove();
+
+            // 用 srcdoc iframe 渲染完整 HTML（head+body）
+            // srcdoc 无 sandbox，CSS/JS 可正常加载，<base> 使相对路径指向 wiki
+            const oldIframe = container.querySelector("iframe");
+            if (oldIframe) oldIframe.remove();
+
+            const iframe = document.createElement("iframe");
+            iframe.srcdoc = data.full;
+            container.appendChild(iframe);
+
+            document.getElementById("status").textContent = `渲染完成 (${(data.length/1024).toFixed(1)} KB)`;
+        } else {
+            document.getElementById("status").textContent = "❌ " + (data.error || "渲染失败");
+        }
+    } catch (err) {
+        document.getElementById("status").textContent = "❌ 网络错误: " + err.message;
+    }
+    btn.textContent = "🔍 预览";
+    btn.classList.remove("loading");
+}
+
+document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doPreview(); }
+});
+
+const params = new URLSearchParams(location.search);
+if (params.has("file")) {
+    fetch(params.get("file"))
+        .then(r => { if(!r.ok) throw new Error(r.status); return r.text(); })
+        .then(t => { document.getElementById("editor").value = t; document.getElementById("status").textContent = params.get("file"); })
+        .catch(e => { document.getElementById("status").textContent = "❌ 无法加载: " + e.message; });
+}
+</script>
+</body>
+</html>
