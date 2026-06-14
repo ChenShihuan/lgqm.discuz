@@ -200,6 +200,22 @@ table.infobox { margin: 0.5em 0 0.5em 1em; padding: 0.2em; float: right; clear: 
 </style>"""
 
 
+# 锚点修复：点击 # 链接时在 iframe 内本地滚动（替代 <base> 方案）
+_ANCHOR_FIX_JS = """<script>
+(function(){
+  document.addEventListener('click', function(e){
+    var a = e.target.closest('a');
+    if (a && a.hash && (!a.href || a.href.endsWith(a.hash) || a.getAttribute('href','').startsWith('#'))) {
+      e.preventDefault();
+      var id = decodeURIComponent(a.hash.slice(1));
+      var el = document.getElementById(id);
+      if (el) { el.scrollIntoView({behavior:'smooth',block:'start'}); }
+    }
+  });
+})();
+</script>"""
+
+
 def pw_parse_wikitext(wikitext: str, wiki_domain: str = "lgqm") -> str:
     """
     通过灰机 Wiki 的 action=parse API 渲染 wikitext 为 HTML。
@@ -277,18 +293,25 @@ def pw_parse_wikitext(wikitext: str, wiki_domain: str = "lgqm") -> str:
                         _TEMPLATE_CSS + "\n</head>",
                         1
                     )
-                    # <base> 使图片等相对链接指向 wiki
-                    head_html = head_html.replace(
-                        "<head>",
-                        f"<head>\n<base href=\"{wiki_base}/\">",
-                        1
+                    # 修复图片相对路径为绝对路径（替代 <base> 方案，<base> 会破坏锚点导航）
+                    body_html = _re2.sub(
+                        r'(src|href)="(/(?:wiki|images|load|index)\.php[^"]*)"',
+                        rf'\1="{wiki_base}\2"',
+                        body_html
                     )
-                    # 组装完整 HTML 文档
-                    return head_html + "<body>\n" + body_html + "\n</body>\n</html>"
-                # 无 headhtml 时手动构建最小 HTML 文档
+                    body_html = _re2.sub(
+                        r'src="(/(?!(?:/|https?:))[^"]*)"',
+                        rf'src="{wiki_base}/\1"',
+                        body_html
+                    )
+                    # 组装完整 HTML 文档（无 <base> 标签，锚点可正常滚动）
+                    html = head_html + "<body>\n" + body_html + "\n</body>\n</html>"
+                    # 注入锚点修复 JS：点击 # 链接时本地滚动
+                    html += _ANCHOR_FIX_JS
+                    return html
+                # 无 headhtml 时手动构建
                 return (
                     "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n"
-                    + f"<base href=\"{wiki_base}/\">\n"
                     + _TEMPLATE_CSS + "\n</head>\n<body>\n"
                     + body_html + "\n</body>\n</html>"
                 )

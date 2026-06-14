@@ -210,12 +210,11 @@ function showPreviewPanel(html, fileName) {
     <head><meta charset="UTF-8">
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { height: 100vh; overflow: hidden; background: #fff; }
+      html, body { height: 100vh; overflow: auto; background: #fff; }
       iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; background: #fff; }
     </style></head>
     <body>
-      <iframe sandbox="allow-scripts allow-same-origin"
-              srcdoc="${escapeHtml(html)}"></iframe>
+      <iframe srcdoc="${escapeHtml(html)}"></iframe>
     </body></html>`;
 }
 
