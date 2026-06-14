@@ -187,8 +187,18 @@ function showDashboardPanel() {
       iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
     </style></head>
     <body>
-      <iframe src="${SERVER_URL}/"></iframe>
+      <iframe src="${SERVER_URL}/?vscode=1"></iframe>
+      <script>
+        const vscodeApi=acquireVsCodeApi();
+        window.addEventListener('message',function(e){
+          if(e.data&&e.data.command==='openExternal') vscodeApi.postMessage(e.data);
+        });
+      </script>
     </body></html>`;
+
+  dashboardPanel.webview.onDidReceiveMessage(m=>{
+    if(m.command==='openExternal'&&m.url) vscode.env.openExternal(vscode.Uri.parse(m.url));
+  });
 
   dashboardPanel.onDidDispose(() => {
     dashboardPanel = null;

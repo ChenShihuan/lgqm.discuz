@@ -115,6 +115,8 @@ a:hover{text-decoration:underline}
 
 <script>
 let D=null,W=null,tab='updated',pg=1,P=50,QT={};  // D=report, W=wiki
+const isVscode=window.parent!==window&&new URLSearchParams(location.search).has('vscode');
+function forumUrl(url){return url||'#';}
 
 async function load(){
   try{
@@ -194,7 +196,7 @@ function render(){
     h='<table><tr><th style="width:28px"><input type="checkbox" id="cbAll" onchange="toggleAll(this)" title="全选"></th><th>TID</th><th>标题</th><th>作者</th><th>论坛最后回复</th><th>Wiki 更新</th><th>回复/查看</th><th>原因</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{},inQ=QT.has(t.tid);
-      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_self">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${forumUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${w.last_update||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td><small>${i.reason||''}</small></td>
         <td>
@@ -206,7 +208,7 @@ function render(){
     h='<table><tr><th style="width:28px"><input type="checkbox" id="cbAll" onchange="toggleAll(this)" title="全选"></th><th>TID</th><th>标题</th><th>作者</th><th>最后回复</th><th>回复/查看</th><th>新人</th><th>操作</th></tr>';
     for(const i of pp){
       const t=i.forum_thread||{},inQ=QT.has(t.tid);
-      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${proxyUrl(t.url)}" target="_self">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
+      h+=`<tr${i.skipped?' class=skipped':''}><td><input type="checkbox" class="row-cb" value="${t.tid}"></td><td><a href="${forumUrl(t.url)}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td><td>${esc(t.author)}</td>
         <td>${t.last_reply_date||'-'}</td><td>${t.reply_count||0} / ${fmt(t.view_count)}</td>
         <td>${t.is_newcomer?'<span class="tag tag-new">新人</span>':''}</td>
         <td>
@@ -219,7 +221,7 @@ function render(){
     for(const i of pp){
       const t=i.forum_thread||{},w=i.wiki_article||{};
       const vs=i.verified,vt=vs===true?'<span class="tag tag-ok">可达</span>':vs===false?'<span class="tag tag-fail">不可达</span>':'<span class="tag">未验证</span>';
-      h+=`<tr><td><a href="${proxyUrl(t.url||'')}" target="_self">${t.tid}</a></td><td>${esc(t.title)}</td>
+      h+=`<tr><td><a href="${forumUrl(t.url||'')}" target="_blank">${t.tid}</a></td><td>${esc(t.title)}</td>
         <td>${esc(w.title||'-')}</td><td>${w.filename||'-'}</td>
         <td>${((i.confidence||0)*100).toFixed(0)}%</td><td>${vt}</td><td><small>${i.reason||''}</small></td></tr>`;
     }
@@ -227,7 +229,7 @@ function render(){
     h='<table><tr><th>文件名</th><th>标题</th><th>作者</th><th>论坛 TID</th><th>首发</th><th>最近更新</th><th>完结</th></tr>';
     for(const i of pp){
       h+=`<tr><td>${esc(i.filename||'')}</td><td>${esc(i.title||'')}</td><td>${esc(i.author||'')}</td>
-        <td>${i.forum_tid?`<a href=\"/proxy/thread-${i.forum_tid}-1-1.html\" target=\"_blank\">${i.forum_tid}</a>`:'-'}</td>
+        <td>${i.forum_tid?`<a href=\"https://lgqmonline.top/thread-${i.forum_tid}-1-1.html\" target=\"_blank\">${i.forum_tid}</a>`:'-'}</td>
         <td>${i.first_publish||'-'}</td><td>${i.last_update||'-'}</td>
         <td>${i.is_completed||'-'}</td></tr>`;
     }
@@ -313,6 +315,16 @@ document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
   render();
 }));
 load();
+if(isVscode){
+  document.addEventListener('click',function(e){
+    const a=e.target.closest('a');
+    if(!a||!a.href)return;
+    if(a.href.startsWith('https://lgqmonline.top/')){
+      e.preventDefault();
+      window.parent.postMessage({command:'openExternal',url:a.href},'*');
+    }
+  });
+}
 </script>
 </body>
 </html>
