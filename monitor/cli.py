@@ -343,9 +343,21 @@ def cmd_review_info(args):
 def cmd_fetch_images(args):
     """下载帖子图片"""
     from monitor.fetcher import fetch_images
+    from monitor.config import tid_img_dir
+    import os as _os, glob as _glob
 
     tid = args.tid
-    images = fetch_images(tid, verbose=True)
+
+    # 尝试找到已有输出目录（含文章名）
+    output_dir = None
+    pattern = f"output/{tid}-*/text"
+    matches = _glob.glob(pattern)
+    if matches:
+        base = _os.path.dirname(matches[0])
+        output_dir = _os.path.join(base, "img")
+        print(f"📂 输出目录: {output_dir}")
+
+    images = fetch_images(tid, output_dir=output_dir, verbose=True)
     if images:
         print(f"下载了 {len(images)} 张图片")
     else:

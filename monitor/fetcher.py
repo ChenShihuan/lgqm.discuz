@@ -353,9 +353,8 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
 
 def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> List[dict]:
     """
-    从普通帖子页面拉取图片。
-    页面请求使用 ForumSession（含完整浏览器指纹），
-    图片下载使用 get_image()（正确的图片请求头）。
+    从帖子所有页面拉取附件图片。
+    扫描全部页（图片可能散布在各页中），通过 Playwright 获取 HTML。
 
     Args:
         tid: 帖子ID
@@ -372,54 +371,99 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
 
     os.makedirs(output_dir, exist_ok=True)
 
-    images = []
-    url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
-
-    log(f"获取帖子图片 (常规模式): {url}", "INFO")
-
     try:
         from lxml import etree
     except ImportError:
         log("图片下载需要 lxml 库: pip install lxml", "WARN")
-        return images
+        return []
 
     fs = get_forum_session()
     fs.ensure_logged_in()
 
-    try:
-        # 使用 Playwright 获取帖子页面 HTML（绕过 JS 挑战）
-        html = pw_get_html(url, timeout=30000)
+    images = []
+    seen = set()  # 去重
+    page = 1
+
+    while True:
+        url = f"https://lgqmonline.top/thread-{tid}-{page}-1.html"
+        try:
+            html = pw_get_html(url, timeout=30000)
+        except Exception as e:
+            log(f"第 {page} 页加载失败: {e}", "WARN")
+            break
 
         tree = etree.HTML(html)
 
-        # 查找 <img file="..."> 标签（Discuz 附件图片）
-        img_elems = tree.findall('.//img[@file]')
+        # 检查是否有帖子内容（无内容说明已到末页或页面无效）
+        post_tables = tree.xpath('//table[contains(@id, "pid")]')
+        if not post_tables:
+            break
+
+        # 查找附件图片：优先 <img file="..."> 其次 <img zoomfile="...">
+        img_elems = tree.xpath('//img[@file]')
+        if not img_elems:
+            img_elems = tree.xpath('//img[@zoomfile]')
+
         for img in img_elems:
-            file_attr = img.get('file', '')
-            if not file_attr:
+            # 获取图片路径（优先 file，回退 zoomfile）
+            src = img.get('file', '') or img.get('zoomfile', '')
+            if not src:
                 continue
 
-            # 构建完整图片 URL
-            if file_attr.startswith('http'):
-                img_url = file_attr
-            elif file_attr.startswith('//'):
-                img_url = f"https:{file_attr}"
-            elif file_attr.startswith('/'):
-                img_url = f"https://lgqmonline.top{file_attr}"
-            else:
-                img_url = f"https://lgqmonline.top/{file_attr}"
+            # 跳过非附件图片（static/ 下的 UI 图标）
+            if 'static/' in src:
+                continue
 
-            # 提取文件名
-            filename_match = re.search(r'([^/]+\.(?:gif|jpg|jpeg|png|svg))', file_attr, re.IGNORECASE)
-            filename = filename_match.group(1) if filename_match else f"img_{hash(file_attr)}"
+            # 提取文件名：优先从 file/zoomfile 中取完整文件名
+            filename = _extract_filename(src)
+            if not filename:
+                continue
+
+            if filename in seen:
+                continue
+            seen.add(filename)
+
+            # 构建完整 URL
+            if src.startswith('http'):
+                img_url = src
+            elif src.startswith('//'):
+                img_url = f"https:{src}"
+            elif src.startswith('/'):
+                img_url = f"https://lgqmonline.top{src}"
+            else:
+                img_url = f"https://lgqmonline.top/{src}"
+
+            # 如果 file 属性没有扩展名，尝试 zoomfile
+            if '.' not in filename.rsplit('/', 1)[-1]:
+                zoom = img.get('zoomfile', '')
+                if zoom:
+                    zf = _extract_filename(zoom)
+                    if zf:
+                        filename = zf
+                        # 用 zoomfile 的 URL 替换
+                        if zoom.startswith('http'):
+                            img_url = zoom
+                        elif zoom.startswith('//'):
+                            img_url = f"https:{zoom}"
+                        elif zoom.startswith('/'):
+                            img_url = f"https://lgqmonline.top{zoom}"
+                        else:
+                            img_url = f"https://lgqmonline.top/{zoom}"
 
             local_path = os.path.join(output_dir, filename)
 
-            # 下载图片（使用图片专用请求头）
+            # 跳过已下载的
+            if os.path.exists(local_path):
+                images.append({
+                    "url": img_url, "filename": filename, "local_path": local_path,
+                })
+                continue
+
+            # 下载图片
             try:
                 rate_limit(time.time(), 1.0)
                 img_resp = fs.get_image(img_url, referer=url)
-                if img_resp.status_code == 200:
+                if img_resp.status_code == 200 and len(img_resp.content) > 100:
                     with open(local_path, 'wb') as f:
                         f.write(img_resp.content)
                     images.append({
@@ -428,50 +472,33 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
                         "local_path": local_path,
                     })
                     if verbose:
-                        log(f"  图片: {filename}", "INFO")
-            except Exception as e:
-                log(f"图片下载失败 {filename}: {e}", "WARN")
-
-        # 也查找常规 <img> 标签（非附件图片）
-        normal_imgs = tree.findall('.//img[@src]')
-        for img in normal_imgs:
-            src = img.get('src', '')
-            if not src or 'attachment' not in src or 'image' not in src:
-                continue
-            # 处理附件图片的另一种格式
-            if 'forum.php?mod=attachment' in src or 'data/attachment' in src:
-                if src.startswith('//'):
-                    img_url = f"https:{src}"
-                elif src.startswith('/'):
-                    img_url = f"https://lgqmonline.top{src}"
+                        log(f"  [{page}] {filename}", "INFO")
                 else:
-                    img_url = src
+                    log(f"  [{page}] {filename} HTTP {img_resp.status_code} / {len(img_resp.content)} bytes", "WARN")
+            except Exception as e:
+                log(f"  [{page}] {filename} 下载失败: {e}", "WARN")
 
-                filename_match = re.search(r'([^/&?]+\.(?:gif|jpg|jpeg|png|svg))', src, re.IGNORECASE)
-                if not filename_match:
-                    continue
-                filename = filename_match.group(1)
-                local_path = os.path.join(output_dir, filename)
+        # 检查是否有下一页
+        next_page = tree.xpath('//a[contains(@class,"nxt")]')
+        if not next_page:
+            break
+        page += 1
 
-                try:
-                    rate_limit(time.time(), 1.0)
-                    img_resp = fs.get_image(img_url, referer=url)
-                    if img_resp.status_code == 200:
-                        with open(local_path, 'wb') as f:
-                            f.write(img_resp.content)
-                        images.append({
-                            "url": img_url,
-                            "filename": filename,
-                            "local_path": local_path,
-                        })
-                except Exception:
-                    pass
-
-    except Exception as e:
-        log(f"图片拉取异常: {e}", "ERROR")
-
-    log(f"图片拉取完成：共 {len(images)} 张", "SUCCESS" if images else "INFO")
+    log(f"图片拉取完成：共 {len(images)} 张（{page} 页）", "SUCCESS" if images else "INFO")
     return images
+
+
+def _extract_filename(src: str) -> str:
+    """从图片路径中提取文件名"""
+    # 带扩展名的：xxx.jpg
+    match = re.search(r'([^/]+\.(?:gif|jpg|jpeg|png|svg|bmp))', src, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    # 不带扩展名的（Discuz 附件 ID 格式）
+    match = re.search(r'([^/]+(?:gif|jpg|jpeg|png|svg|bmp))', src.split('?')[0], re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return ""
 
 
 def fetch_thread_with_images(tid: int, download_images: bool = True,
