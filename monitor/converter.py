@@ -345,6 +345,12 @@ def _is_chapter_start(first_line: str) -> bool:
     import re as _re
     line = first_line.strip()
 
+    # 非标题内容：图片引用、链接、纯符号
+    if _re.match(r'\[\[(?:File|Image):', line):
+        return False
+    if line.startswith(('http://', 'https://', '[http')):
+        return False
+
     # 规则 1: 以对话引导符开头 → 延续（非章节）
     if line.startswith(('"', '"', '"', '「', '「', '"', "'", '“')):
         return False
@@ -359,12 +365,17 @@ def _is_chapter_start(first_line: str) -> bool:
             if not line.endswith(('了', '在', '的', '呢', '吧', '啊')):
                 return True
 
-    # 规则 4: 日期格式开头 → 真章节
+    # 规则 4: 日期/番外格式开头 → 真章节
     if _re.match(r'圣历|第[一二三四五六七八九十百千]+章|番外', line):
         return True
 
-    # 默认：不确定，保守地视为章节（避免漏判真正的章节断裂点）
-    return True
+    # 规则 5: 小说式场景设定开头 → 真章节
+    #   "时间，地点，人物，事件" 式的句子
+    if _re.match(r'\d{4}年', line):
+        return True
+
+    # 默认：不确定 → 保守地视为延续（不创建新章节）
+    return False
 
 
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
@@ -486,7 +497,7 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 first_line = lines[0].strip()
                 rest = lines[1].strip() if len(lines) > 1 else ""
                 # 判断是否应作为新章节
-                is_new_chapter = _is_chapter_start(first_line) and not last_was_author_chapter
+                is_new_chapter = _is_chapter_start(first_line)
                 if is_new_chapter and first_line and len(first_line) < 120:
                     wiki_text = f"== {first_line} ==\n\n{rest}"
                     last_was_author_chapter = True
