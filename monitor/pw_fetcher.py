@@ -6,15 +6,6 @@ import os
 import atexit
 from typing import Optional, Dict
 
-# Playwright 需要 libnspr4 等系统库（无 sudo 时提取到 /tmp/chromium_libs）
-_LIB_PATH = "/tmp/chromium_libs/usr/lib/x86_64-linux-gnu"
-if os.path.isdir(_LIB_PATH):
-    os.environ.setdefault("LD_LIBRARY_PATH", _LIB_PATH)
-    # 如果已有值，追加
-    if _LIB_PATH not in os.environ.get("LD_LIBRARY_PATH", ""):
-        existing = os.environ.get("LD_LIBRARY_PATH", "")
-        os.environ["LD_LIBRARY_PATH"] = f"{_LIB_PATH}:{existing}" if existing else _LIB_PATH
-
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
 from .utils import log
@@ -169,6 +160,9 @@ def pw_refresh_cookies():
 # 临高启明灰机 Wiki 常用模板 CSS（注入预览 iframe，替代外部 load.php）
 _TEMPLATE_CSS = """<style>
 /* === 临高启明 Wiki 模板样式 === */
+
+/* 基础背景 */
+body { background: #fff; color: #202122; }
 
 /* 首行缩进 */
 .textIndent p, .textIndent { text-indent: 2em; }

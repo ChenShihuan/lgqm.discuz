@@ -1,0 +1,25 @@
+{
+  "name": "lgqm-wiki-helper",
+  "displayName": "临高启明 Wiki 助手",
+  "description": "监控面板快捷入口 + .mw 文件一键预览",
+  "version": "1.0.0",
+  "publisher": "local",
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "lgqm-wiki.openDashboard", "title": "📊 打开监控面板" },
+      { "command": "lgqm-wiki.previewMw", "title": "🔍 预览当前 .mw 文件" }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "lgqm-wiki.previewMw",
+          "when": "resourceExtname == .mw",
+          "group": "navigation"
+        }
+      ]
+    }
+  }
+}
