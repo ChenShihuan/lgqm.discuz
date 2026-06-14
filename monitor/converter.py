@@ -311,6 +311,31 @@ def _convert_reply(html: str) -> str:
     return "\n".join(parts)
 
 
+def _should_keep_question(text: str) -> bool:
+    """
+    判断读者提问是否有实质内容，过滤纯赞美/催更/无意义回复。
+    参考 review-article skill 中的 should_keep() 逻辑。
+    """
+    import re as _re
+    clean = _re.sub(r'\[\[Image:[^]]+\]\]', '', text).strip()
+    clean = _re.sub(r'\n+', ' ', clean).strip()
+    if not clean:
+        return False
+    if len(clean) < 10:
+        return False
+    praise = ['赞美', '催更', '加油', '顶', '支持', '楼主加油',
+              '前排', '马克', '留名', '先赞后看', '写得好', '等更', '好康',
+              '高产', '文笔', '好评', '鼓掌', '撒花', '更新了', '新坑',
+              '祝楼主', '文运', '题材好', '期待更新', '快点更', '快更新']
+    for pw in praise:
+        if pw in clean and len(clean) < 40:
+            return False
+    # 纯符号/数字/英文短句
+    if _re.match(r'^[\s!！。.…\-—~～0-9a-zA-Z]+$', clean) and len(clean) < 15:
+        return False
+    return True
+
+
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                             config: dict = None) -> str:
     """
@@ -364,40 +389,89 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     else:
         parts.append("{{同人作品版权声明}}\n")
 
-    # 4. 转换每个楼层并去重
-    seen_content = set()  # 用于去除跨楼引用重复
-    for post in posts:
-        wiki_text = convert_post(post, config)
-        if not wiki_text:
-            continue
+    # 4. 第一轮：收集作者回复引用的原帖 pid
+    import re as _re2
+    cited_pids = set()  # 被作者回复引用的读者帖 pid（纯数字格式）
+    pid_to_post = {}    # pid（纯数字）→ Post 映射
+    author_reply_pids = {}  # {作者帖pid: [引用的读者帖pid列表]}
 
+    for post in posts:
+        # 标准化 pid：去除 "pid" 前缀，统一用纯数字做 key
+        numeric_pid = post.pid.replace("pid", "") if post.pid else ""
+        if numeric_pid:
+            pid_to_post[numeric_pid] = post
+        is_author = thread_author and post.author.strip() == thread_author.strip()
+        if is_author and not post.is_first_post and '<blockquote>' in (post.content_html or ""):
+            # 提取 blockquote 中引用的原帖 pid（纯数字格式）
+            refs = _re2.findall(r'pid=(\d+)', post.content_html)
+            if refs:
+                author_reply_pids[post.pid] = refs
+                for r in refs:
+                    cited_pids.add(r)
+
+    # 5. 第二轮：生成输出
+    seen_content = set()  # 去重
+    for post in posts:
         is_author = thread_author and post.author.strip() == thread_author.strip()
         raw_html = post.content_html or ""
+        has_blockquote = '<blockquote>' in raw_html
 
-        # 楼主回复检测：内容中包含 <blockquote> 表示是回复其他网友
-        is_author_reply = is_author and not post.is_first_post and '<blockquote>' in raw_html
+        # --- 作者回复读者 ---
+        if is_author and not post.is_first_post and has_blockquote:
+            refs = author_reply_pids.get(post.pid, [])
+            qa_parts = []
 
-        if is_author_reply:
-            # 楼主回复 → 同人注释（引用+回复 格式）
-            wiki_text = _convert_reply(raw_html)
-            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+            # 找到被引用的读者帖，提取原文（过滤无意义赞美/催更）
+            for ref_pid in refs:
+                cited_post = pid_to_post.get(ref_pid)
+                if cited_post:
+                    cited_text = html_to_wiki(cited_post.content_html).strip()
+                    if cited_text and _should_keep_question(cited_text):
+                        qa_parts.append(f"{cited_post.author}: {cited_text}")
+
+            # 作者回复内容（blockquote 之后的部分）
+            bq_end = _re2.search(r'</blockquote>', raw_html)
+            if bq_end:
+                reply_html = raw_html[bq_end.end():]
+                reply_wiki = html_to_wiki(reply_html).strip()
+                if reply_wiki:
+                    qa_parts.append(reply_wiki)
+
+            if qa_parts:
+                wiki_text = "\n\n---\n\n".join(qa_parts)
+                wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
+            else:
+                continue
+
+        # --- 作者纯内容帖 ---
         elif is_author and not post.is_first_post:
-            # 楼主纯内容帖：>=200 字视为章节，<200 字视为短注
+            wiki_text = convert_post(post, config)
+            if not wiki_text:
+                continue
             if len(wiki_text) >= 200:
-                # 作者章节：首行作为标题
+                # 章节：首行作为标题
                 lines = wiki_text.split('\n', 1)
                 first_line = lines[0].strip()
                 if first_line and len(first_line) < 120:
                     rest = lines[1].strip() if len(lines) > 1 else ""
                     wiki_text = f"== {first_line} ==\n\n{rest}"
             else:
-                # 短内容 → 同人注释
+                # 短注 → 同人注释
                 wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
-        elif not post.is_first_post and not is_author:
-            # 其他网友回复 → 同人注释
-            wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
 
-        # 去重：跳过与前面楼层高度重复的内容（论坛引用导致）
+        # --- 首楼 ---
+        elif post.is_first_post:
+            wiki_text = convert_post(post, config)
+            if not wiki_text:
+                continue
+
+        # --- 读者帖：全部跳过 ---
+        #   读者原帖已在作者回复 blockquote 中完整保留（含全文），
+        #   同人注释由作者回复的 Q&A 块唯一承载，读者帖不单独输出。
+        elif not is_author:
+            continue
+
+        # 去重
         text_normalized = wiki_text.strip()[:200]
         if text_normalized and text_normalized in seen_content:
             continue

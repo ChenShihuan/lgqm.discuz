@@ -285,6 +285,9 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
             break
 
         for i, table in enumerate(post_tables):
+            # 提取 pid（从 table id="pid532556904"）
+            pid = table.get('id', '')
+
             # 作者
             auth_elem = table.xpath('.//*[contains(@class,"authi")]')
             author = ""
@@ -327,6 +330,7 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
                     "content_html": content_html,
                     "floor": len(all_posts_data) + 1,
                     "is_first_post": len(all_posts_data) == 0,
+                    "pid": pid,
                 })
 
         if verbose:
@@ -347,6 +351,7 @@ def _fetch_thread_regular(tid: int, verbose: bool = False) -> List[Post]:
             content_html=data["content_html"],
             floor=data["floor"],
             is_first_post=data["is_first_post"],
+            pid=data.get("pid", ""),
         ))
     return posts
 

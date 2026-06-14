@@ -38,6 +38,7 @@ class Post:
     content_html: str           # 原始 HTML 内容
     floor: int = 0              # 楼层号
     is_first_post: bool = False  # 是否首楼
+    pid: str = ""               # Discuz 帖子 ID（如 pid532556904）
 
 
 @dataclass
