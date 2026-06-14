@@ -36,6 +36,27 @@ def format_posts_for_analysis(posts, max_floors: int = 10) -> str:
         lines.append(wiki_text)
         lines.append("")
 
+    # AI 分析指引
+    lines.append("=" * 60)
+    lines.append("=== AI 分析指引 ===")
+    lines.append("=" * 60)
+    lines.append("请分析上述楼层内容中的目录结构，特别注意：")
+    lines.append("")
+    lines.append('1. **嵌套结构识别**：如果目录包含嵌套（如"卷/案"下包含多个子章节），')
+    lines.append('   请为每个条目标注 level 字段，生成 toc_analysis.json：')
+    lines.append('   - level: 1 → 卷/案/篇 (最顶层的分组，如 "第一案"、"第一卷")')
+    lines.append("   - level: 2 → 标准章节 (默认，扁平结构或中等层级)")
+    lines.append("   - level: 3 → 子章节/小节 (某个章节下的小节)")
+    lines.append("")
+    lines.append("2. **判断嵌套的方法**：")
+    lines.append('   - 编号体系：如顶层 "一 南海案" 后跟子编号 "一""二""三"')
+    lines.append('     → 顶层 level=1，子编号 level=2')
+    lines.append('   - 命名模式："第X卷" 含 "第X章" → 卷 level=1，章 level=2')
+    lines.append("   - 扁平结构：无嵌套 → 全部 level=2 (可省略 level 字段)")
+    lines.append("")
+    lines.append("3. **如未检测到目录**：前几层楼均为正文 → 无需生成 toc_analysis.json")
+    lines.append("")
+
     return "\n".join(lines)
 
 

@@ -1,6 +1,7 @@
 ---
 name: update-article
 description: 对 Wiki 已收录的同人文章，从论坛拉取最新内容更新 .mw 文件
+model: haiku
 ---
 
 # Update Article — 更新已有 Wiki 文章

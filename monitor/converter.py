@@ -396,6 +396,12 @@ def _is_chapter_start(first_line: str) -> bool:
     return False
 
 
+def _mw_heading(title: str, level: int = 2) -> str:
+    """构建 MediaWiki 标题，level 1→=, 2→==, 3→==="""
+    markers = "=" * max(1, min(3, level))
+    return f"{markers} {title} {markers}"
+
+
 def _parse_toc(wikitext: str) -> dict:
     """
     从主楼 wikitext 中解析目录。
@@ -435,23 +441,28 @@ def _parse_toc(wikitext: str) -> dict:
     return result
 
 
-def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
+def _parse_toc_external(toc_analysis: dict, posts: List[Post]):
     """
-    将外部 TOC 分析结果（来自 AI preanalyze）转为内部格式 {numeric_pid: chapter_name}。
+    将外部 TOC 分析结果（来自 AI preanalyze）转为内部格式。
 
     支持三种映射策略：
       1. PID 直接匹配：entry["pid"] 去前缀后作为 key
       2. 楼层号匹配：entry["floor"] → 查找对应 Post 的 PID
       3. 纯名称：存为 "_name:章节名"（后续由 _is_chapter_start 模糊匹配）
 
-    返回值中额外包含 "_toc_source_floor": int | None，标记目录来源楼层（跳过该楼层）。
+    返回 (toc_chapters, toc_levels)：
+      - toc_chapters: {numeric_pid: chapter_name}，格式不变
+      - toc_levels: {numeric_pid: level_int}，默认 2
+      - 内部标记 _toc_source_floor / _first_post 同时存在于两者
     """
-    result = {}
+    toc_chapters = {}
+    toc_levels = {}
     entries = toc_analysis.get("entries", [])
     for entry in entries:
         name = entry.get("chapter_name", "").strip()
         if not name:
             continue
+        level = int(entry.get("level") or 2)  # 默认 level 2
 
         pid = entry.get("pid", "")
         floor = entry.get("floor")
@@ -459,7 +470,8 @@ def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
         # 策略 1: PID 直接匹配
         if pid and pid.strip():
             numeric_pid = pid.strip().replace("pid", "")
-            result[numeric_pid] = name
+            toc_chapters[numeric_pid] = name
+            toc_levels[numeric_pid] = level
             continue
 
         # 策略 2: 楼层号 → PID
@@ -473,18 +485,22 @@ def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
                     if p.floor == floor_int:
                         numeric_pid = p.pid.replace("pid", "") if p.pid else ""
                         if numeric_pid:
-                            result[numeric_pid] = name
+                            toc_chapters[numeric_pid] = name
+                            toc_levels[numeric_pid] = level
                         break
                 continue
 
         # 策略 3: 纯名称（无楼层/PID 对应）
         key = f"_name:{name}"
-        result[key] = name
+        toc_chapters[key] = name
+        toc_levels[key] = level
 
     # 记录目录来源楼层（该楼层仅为 TOC，不应出现在正文中）
     source_floor = toc_analysis.get("source_floor")
     if source_floor is not None:
-        result["_toc_source_floor"] = int(source_floor)
+        sf = int(source_floor)
+        toc_chapters["_toc_source_floor"] = sf
+        toc_levels["_toc_source_floor"] = sf
 
     # 处理首章（TOC 第一个条目若指向首楼）
     if entries and toc_analysis.get("source_floor", 0) >= 0:
@@ -492,10 +508,11 @@ def _parse_toc_external(toc_analysis: dict, posts: List[Post]) -> dict:
         first_floor = first.get("floor")
         if first_floor == 1 or (first_floor is None and not first.get("pid")):
             name = first.get("chapter_name", "").strip()
-            if name and "_first_post" not in result:
-                result["_first_post"] = name
+            if name and "_first_post" not in toc_chapters:
+                toc_chapters["_first_post"] = name
+                toc_levels["_first_post"] = int(first.get("level") or 2)
 
-    return result
+    return toc_chapters, toc_levels
 
 
 def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
@@ -576,19 +593,22 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                     cited_pids.add(r)
 
     # 4.5. 解析目录（如存在），建立 pid→章节名 映射
-    toc_chapters = {}  # {numeric_pid: chapter_name}
+    toc_chapters = {}   # {numeric_pid: chapter_name}
+    toc_levels = {}     # {numeric_pid: level_int}，默认 2
     if toc_analysis:
         # 优先使用外部 TOC 分析结果（来自 preanalyze + AI）
-        toc_chapters = _parse_toc_external(toc_analysis, posts)
+        toc_chapters, toc_levels = _parse_toc_external(toc_analysis, posts)
     elif posts and posts[0].content_html:
         # 回退到首楼自动解析
         first_wikitext = html_to_wiki(posts[0].content_html)
         toc_chapters = _parse_toc(first_wikitext)
+        # toc_levels 为空 → 所有 .get(key, 2) 返回默认 level 2
 
     # 5. 第二轮：生成输出
     seen_content = set()  # 去重
     last_was_author_chapter = False  # 追踪连续作者帖
     merged_titles = []  # 收集被合并的标题，供人工复核
+    current_toc_level = 0  # 当前 TOC 章节层级，0=未进入
     toc_source_floor = toc_chapters.get("_toc_source_floor")
     for post in posts:
         # 跳过 TOC 目录页（该楼层仅为目录，不应出现在正文中）
@@ -624,6 +644,7 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                 wiki_text = "\n\n---\n\n".join(qa_parts)
                 wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
                 last_was_author_chapter = False  # 打断连续章节链
+                current_toc_level = 0
             else:
                 continue
 
@@ -649,9 +670,12 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                         first_line = clean_title
                     # 优先使用 TOC 中的章节名（匹配 pid）
                     if toc_name:
-                        wiki_text = f"== {toc_name} ==\n\n{rest}"
+                        level = toc_levels.get(numeric_pid, 2)
+                        current_toc_level = level
+                        wiki_text = _mw_heading(toc_name, level) + f"\n\n{rest}"
                     else:
-                        wiki_text = f"== {first_line} ==\n\n{rest}"
+                        inferred = min(current_toc_level + 1, 3) if current_toc_level > 0 else 2
+                        wiki_text = _mw_heading(first_line, inferred) + f"\n\n{rest}"
                     last_was_author_chapter = True
                 elif last_was_author_chapter and parts:
                     # 连续作者帖 → 合并到上一个章节末尾
@@ -660,20 +684,24 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                     last_was_author_chapter = True
                     continue
                 else:
-                    # 不是章节也不是合并 → 记录被过滤的标题
+                    # 不是章节也不是合并 → 记录被过滤的标题，重置 TOC 层级
                     merged_titles.append(first_line[:60])
                     last_was_author_chapter = False
+                    current_toc_level = 0
             else:
                 # 短文 → 检查 TOC 映射：若该 PID 在目录中是章节，也创建标题
                 numeric_pid = post.pid.replace("pid", "") if post.pid else ""
                 toc_name = toc_chapters.get(numeric_pid, "")
                 if toc_name:
-                    wiki_text = f"== {toc_name} ==\n\n{wiki_text}"
+                    level = toc_levels.get(numeric_pid, 2)
+                    current_toc_level = level
+                    wiki_text = _mw_heading(toc_name, level) + f"\n\n{wiki_text}"
                     last_was_author_chapter = True
                 else:
                     # 短注 → 同人注释
                     wiki_text = f"{{{{同人注释start}}}}\n{wiki_text}\n{{{{同人注释end}}}}"
                     last_was_author_chapter = False
+                    current_toc_level = 0
 
         # --- 首楼 ---
         elif post.is_first_post:
@@ -695,9 +723,11 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
 
             if "_first_post" in toc_chapters:
                 toc_name = toc_chapters["_first_post"]
+                level = toc_levels.get("_first_post", 2)
+                current_toc_level = level
                 lines = wiki_text.split('\n', 1)
                 body = lines[1].strip() if len(lines) > 1 else wiki_text
-                wiki_text = f"== {toc_name} ==\n\n{body}"
+                wiki_text = _mw_heading(toc_name, level) + f"\n\n{body}"
                 last_was_author_chapter = True
 
         # --- 读者帖：全部跳过 ---

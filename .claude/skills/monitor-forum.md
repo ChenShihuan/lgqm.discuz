@@ -1,6 +1,7 @@
 ---
 name: monitor-forum
 description: 扫描临高启明论坛同人板块，对比灰机 Wiki 已有文章，发现新帖和更新帖
+model: haiku
 ---
 
 # Monitor Forum — 论坛同人板块监控

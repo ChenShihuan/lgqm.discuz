@@ -263,8 +263,8 @@ def _print_suggestions(content: str, article_name: str, images: list):
         suggestions.append("「内容关键字」字段为空，建议补充标签")
 
     # 2. 检查是否包含 TOC
-    if "__TOC__" not in content and content.count("\n==") >= 3:
-        suggestions.append("正文超过 3 节，建议在 Infobox 后添加 __TOC__ 自动生成目录")
+    if "__TOC__" not in content and re.search(r'^={1,3} .+ ={1,3}$', content, re.MULTILINE):
+        suggestions.append("正文有章节标题，建议在 Infobox 后添加 __TOC__ 自动生成目录")
 
     # 3. 图片建议
     if not images:
@@ -280,7 +280,7 @@ def _print_stats(content: str, article_name: str, images: list):
     """打印内容统计信息"""
     import re
     annotation_blocks = len(re.findall(r'\{\{同人注释start\}\}', content))
-    chapters = len(re.findall(r'=== .+ ===', content))
+    chapters = len(re.findall(r'^={1,3} .+ ={1,3}$', content, re.MULTILINE))
     chars = len(content)
     print(f"\n📊 统计: 章节 {chapters} | 同人注释 {annotation_blocks} 块 | 总字符 {chars}")
 
@@ -315,7 +315,7 @@ def cmd_review_info(args):
     if chapters:
         print(f"\n📑 发现的章节标记 ({len(chapters)}):")
         for c in chapters[:15]:
-            is_header = re.match(r'^=== .+ ===$', c.strip())
+            is_header = re.match(r'^={1,3} .+ ={1,3}$', c.strip())
             tag = '✅' if is_header else '  '
             print(f"   {tag} {c.strip()[:50]}")
 
@@ -408,10 +408,11 @@ def cmd_preanalyze(args):
   "source_floor": <包含目录的楼层号>,
   "format": "pid_links | freeform_list | numbered",
   "entries": [
-    {"floor": 楼层号或null, "pid": "数字或null", "chapter_name": "章节名"},
+    {"floor": 楼层号或null, "pid": "数字或null", "chapter_name": "章节名", "level": 1|2|3},
     ...
   ]
-}""")
+}
+level: 1=卷/案(顶层), 2=标准章节(默认), 3=子章节""")
 
 
 def cmd_match_titles(args):
