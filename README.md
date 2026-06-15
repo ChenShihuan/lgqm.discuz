@@ -101,6 +101,18 @@ python3 -m monitor.cli webui
 | Wiki 文章 | 查看已收录文章，按 TID 有无筛选、按日期排序 |
 | 预览 | 在线 Wiki 渲染预览（粘贴 wikitext 或加载 .mw 文件） |
 
+### DeepSeek Subagent（可选）
+
+批量导入时每篇文章可并行分派 DeepSeek subagent 独立执行完整流程，审阅优化等机械性工作可节省 ~10-50x 成本。
+
+```bash
+# 一键安装
+curl -sSL https://raw.githubusercontent.com/PsChina/deepseek-as-subagent/main/curl-install.sh | bash
+
+# 编辑配置文件
+# ~/.deepseek-mcp/config.json → 填写 api_key（从 platform.deepseek.com 获取）
+```
+
 ### Claude Code Skills
 
 | 触发词 | 功能 |
@@ -110,7 +122,8 @@ python3 -m monitor.cli webui
 | "导入 \<tid\>" | 拉取帖子 + 下载图片 → .raw.mw + .mw |
 | "审阅 \<文章名\>" | 交互式优化：Infobox、章节、注释、段落 |
 | "更新 \<tid\>" | 增量更新已有 Wiki 文章 |
-| "/import-queue" | 批量导入队列中所有文章 |
+| "/import-queue" | 读取队列，并行分派 DeepSeek subagent 独立执行完整导入+审阅+定稿 |
+| "/ds \<任务\>" | 显式派工给 DeepSeek subagent（绕过自动决策） |
 
 ### CLI 命令
 
@@ -178,19 +191,22 @@ git rebase refs/remotes/origin/master
 - **Cookie 管理**：pickle 持久化到 `data/cookies.pkl`，二次启动跳过登录
 - **请求节流**：±30% 随机抖动，避免被识别为爬虫
 - **格式转换**：HTML → MediaWiki 标记 + Infobox 生成 + 章节自动检测
+- **DeepSeek Subagent**：批量审阅并行派工，Read/Write/Edit/Bash/Glob/Grep/NotebookEdit 7 工具沙箱
 - **WebUI**：纯 Python HTTP 服务器，JavaScript 前端
 
 ## 工作流
 
 ```
-论坛监控 → 差异审阅 → 导入文章(.raw.mw) → 审阅优化(.mw) → 复制到 Wiki 仓库
+论坛监控 → 差异审阅 → 导入文章(.raw.mw) → 审阅优化(.mw) → 预览确认 → 复制到 Wiki 仓库
+                                   ↗ 批量导入 → DeepSeek subagent 并行审阅+定稿
 ```
 
 1. **监控**：扫描 forum-39 → 对比 Wiki 索引 → 差异报告
 2. **导入**：Playwright 拉取帖子 + 下载图片 → 转换 Wiki 格式 → `.raw.mw`（原始）+ `.mw`（基础处理）
 3. **审阅**：补全 Infobox → 格式化章节标题 → 清理同人注释 → 段落格式化 → 对比差异
 4. **预览**：VS Code 内一键预览 / WebUI 在线渲染
-5. **提交**：复制 `.mw` 到 Wiki 仓库 → git commit
+5. **提交**：复制 `.mw` 到 Wiki 仓库 → git commit 或 mw_push.py
+6. **批量**：`/import-queue` → Claude 监工 → DeepSeek subagent 并行每篇完整流程
 
 ## 格式转换规则
 

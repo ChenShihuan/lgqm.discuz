@@ -1,6 +1,6 @@
 # 论坛同人监控与 Wiki 同步系统 — 设计文档
 
-> 版本: 2.0 | 日期: 2026-06-14
+> 版本: 2.1 | 日期: 2026-06-15
 
 ---
 
@@ -18,7 +18,7 @@
 
 ## 2. 架构设计
 
-### 2.1 数据流（v2.0）
+### 2.1 数据流（v2.1）
 
 ```
 forum-39 (Discuz X3.4 + Cloudflare)
@@ -45,12 +45,13 @@ forum-39 (Discuz X3.4 + Cloudflare)
 └─────────────┘
      │
      ├─ WebUI 看板 (webui/)
-     │  └─ 分类浏览、队列管理、Wiki 预览、论坛代理
+     │  ├─ 分类浏览、队列管理、Wiki 预览、论坛代理
+     │  └─ 导入队列 CRUD → data/import_queue.json
      │
      ├─ VS Code 扩展 (lgqm-wiki-helper/)
      │  └─ 状态栏入口 + .mw 预览按钮
      │
-     ▼ (人工审阅)
+     ▼ (人工审阅 / 批量派工)
 ┌──────────────┐
 │  fetcher.py  │  Playwright 拉取帖子 + 附件图片 → Post[]
 └──────────────┘
@@ -61,13 +62,19 @@ forum-39 (Discuz X3.4 + Cloudflare)
 │              │  → output/{tid}-{name}/text/{name}.raw.mw + .mw
 └──────────────┘
      │
-     ▼
-┌──────────────┐
-│ pw_fetcher   │  pw_parse_wikitext() → Wiki API 渲染预览
-│ (preview)    │  → iframe srcdoc 完整渲染（含内联 CSS + <base>）
-└──────────────┘
+     ├─ 单篇审阅 (Claude Code review-article skill)
+     │  └─ 补全 Infobox → 章节格式化 → 注释过滤 → 段落清理
      │
-     ▼ (人工审阅)
+     ├─ 批量审阅 (import-queue + DeepSeek Subagent 并行派工)
+     │  └─ N 篇同时: review-info → 11 项优化 → word-count → 复制 → 更新列表
+     │
+     ▼
+┌────────────────┐
+│  pw_fetcher    │  pw_parse_wikitext() → Wiki API 渲染预览
+│  (preview)     │  → iframe srcdoc 完整渲染（含内联 CSS + <base>）
+└────────────────┘
+     │
+     ▼
   复制 → huijiwiki 仓库 → git commit / mw_push.py
 ```
 
@@ -255,17 +262,43 @@ converter.py → update_existing_wiki() 增量追加
 展示 diff → 用户确认
 ```
 
-### 5.5 import-queue
+### 5.5 import-queue（监工模式 + DeepSeek Subagent 并行派工）
 
 ```
 用户: "/import-queue"
   ↓
 读取 data/import_queue.json
   ↓
-逐篇: CLI import → review-article → 复制到 Wiki
+并行分派 DeepSeek subagent（每篇一个独立 MCP 调用）
   ↓
-清空队列 → 输出汇总
+  ┌─ subagent 1 (TID=19392) ──────────────────────┐
+  │ ① Read import-article.md + review-article.md  │
+  │ ② CLI import --download-images (Playwright)    │
+  │ ③ review-info + 全面优化 .mw                   │
+  │ ④ word-count + cp Wiki 仓库 + 更新作品列表      │
+  │ ⑤ 返回 JSON 状态                                │
+  └────────────────────────────────────────────────┘
+  ┌─ subagent 2 (TID=12311) ──────────────────────┐
+  │ ...相同完整流程...                               │
+  └────────────────────────────────────────────────┘
+  ↓
+Claude 监工: 抽样验证各 subagent 产物（Infobox / 文件存在性）
+  ↓
+清空队列 → 输出汇总报告
 ```
+
+**设计要点**：
+- 每个 DeepSeek subagent 是"完整逻辑单元"（~30 turns），独立走完全部步骤
+- 审阅优化（.raw.mw→.mw）是纯文件编辑，无网络依赖，多个 subagent 可并行无冲突
+- import 命令虽需 Playwright 联网，但通过 Python 子进程执行，不受 DeepSeek shell 黑名单限制
+- 每个 subagent 返回 JSON 状态，方便监工程序解析和汇总
+- 并行上限建议 ≤4 篇，避免 Playwright 多实例内存压力
+
+**节省对比**：
+| 模式 | 单篇审阅成本 | 多篇速度 |
+|------|-------------|---------|
+| Claude 全量（旧） | Claude 15+ turns 审阅 | 顺序 |
+| DeepSeek 并行（新） | DeepSeek ~30 turns 审阅（~50x 便宜） | 并行，取最慢篇 |
 
 ---
 
@@ -348,3 +381,114 @@ __TOC__
 | Wikitext 渲染 | `POST /api.php?action=parse` |
 | API 沙盒 | `Special:ApiSandbox` |
 | 页面渲染 | `?action=render` |
+
+---
+
+## 9. DeepSeek Subagent 集成
+
+### 9.1 动机
+
+文章审阅优化步骤是纯文件编辑，不依赖网络，但消耗大量 LLM token。DeepSeek v4-flash 单价约为 Claude 的 1/50，将其用于批量审阅可显著节省成本。
+
+### 9.2 整体架构
+
+```
+Claude Code（主循环，DeepSeek API 兼容后端）
+    │
+    ├─ import-queue (监工)
+    │   └── mcp__deepseek__delegate_to_deepseek ═╗
+    │       (MCP stdio 协议，无网络中转)          ║
+    │                                             ║
+    ▼                                   ═════════╝
+deepseek-as-subagent (Python 子进程)
+    │
+    ├─ config.py       → ~/.deepseek-mcp/config.json
+    ├─ server.py       → MCP 服务器（ping + delegate_to_deepseek）
+    ├─ agent_loop.py   → OpenAI 兼容 API → api.deepseek.com
+    │                      7 工具循环，最多 50 轮
+    ├─ tools.py        → Read/Write/Edit/Bash/Glob/Grep/NotebookEdit
+    └─ safety.py       → 路径沙箱 + 危险命令黑名单
+```
+
+### 9.3 派工决策
+
+| 场景 | 派给 DS | 说明 |
+|------|---------|------|
+| 批量审阅 .raw.mw → .mw | ✅ | 纯文件编辑，无网络 |
+| 文章导入 (CLI import) | ✅ | 通过 Bash 工具调 Python 子进程，Playwright 网络请求正常 |
+| 字数统计 + 复制 + 更新列表 | ✅ | 纯本地操作 |
+| `/ds <任务>` | ✅ | 用户强制派工 |
+| 架构设计/技术选型 | ❌ | Claude 综合推理 |
+| bug 根因分析 | ❌ | 推理密集 |
+| 依赖 CLAUDE.md 约定 | ❌ | DS 拿不到 Claude 端记忆 |
+
+### 9.4 import-queue 并行派工流程
+
+```
+Claude 监工
+  │
+  ├─ Step 1: 读取 data/import_queue.json
+  │
+  ├─ Step 2: 构造 N 个 task 字符串（各含 TID/标题/完整流程指令）
+  │   ┌ 所有 mcp__deepseek__delegate_to_deepseek 调用在同一条响应中发出 ┐
+  │   │ DeepSeek subagent 1        DeepSeek subagent 2        ...       │
+  │   │ ① Read 技能文件            ① Read 技能文件                       │
+  │   │ ② CLI import              ② CLI import                          │
+  │   │ ③ review-info → 优化 .mw  ③ review-info → 优化 .mw              │
+  │   │ ④ 定稿（字数/复制/列表）   ④ 定稿（字数/复制/列表）              │
+  │   │ ⑤ 返回 JSON 状态           ⑤ 返回 JSON 状态                      │
+  │   └────────────────────────────└────────────────────────────          │
+  │
+  ├─ Step 3: 解析 JSON 状态 + 抽样 Read .mw 前 100 行验证
+  ├─ Step 4: 清空队列
+  └─ Step 5: 输出汇总报告（TID/导入/审阅/定稿/备注表格）
+```
+
+### 9.5 Task 参数结构
+
+每个 subagent 收到的 task 包含完整流程指令（~200 行），确保独立闭环：
+
+```
+TID: {tid}
+标题: {title}
+
+## 流程
+### 第一步：Read 规则文件
+### 第二步：CLI import
+### 第三步：review-info + 11 项优化 checklist
+### 第四步：定稿（word-count / cp / index）
+### 第五步：返回 JSON 状态
+```
+
+context 参数携带项目约定（文件路径规则、工具文件位置、审阅规则速查），避免 DeepSeek 重复推导。
+
+### 9.6 安装与配置
+
+```bash
+git clone https://github.com/PsChina/deepseek-as-subagent
+cd deepseek-as-subagent
+./install.sh
+```
+
+配置文件 `~/.deepseek-mcp/config.json`：
+
+```json
+{
+  "api_key": "sk-...",
+  "model": "deepseek-v4-flash",
+  "max_turns": 50,
+  "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "NotebookEdit"]
+}
+```
+
+环境变量覆盖：
+- `DEEPSEEK_API_KEY` — 覆盖 API key
+- `DEEPSEEK_WORKSPACE` — 覆盖工作区路径
+- `DEEPSEEK_MODE=off` — 禁用 DeepSeek 委派
+
+### 9.7 沙箱安全
+
+- 路径限制在已配置的工作区（默认跟随 Claude cwd）
+- 危险命令黑名单：sudo, su, ssh, curl, wget, pip install, git push 等
+- 内联解释器屏蔽：`python -c`, `bash -c`, `perl -e` 等
+- import 的网络请求通过 Python 进程内 Playwright 发起，不受 shell 黑名单影响

@@ -23,6 +23,14 @@
     "update-article": {
       "path": ".claude/skills/update-article.md",
       "description": "对 Wiki 已收录的同人文章，从论坛拉取最新内容更新 .mw 文件"
+    },
+    "review-article": {
+      "path": ".claude/skills/review-article.md",
+      "description": "审阅已下载的原始文件，并进行优化"
+    },
+    "import-queue": {
+      "path": ".claude/skills/import-queue.md",
+      "description": "批量导入队列，每篇文章分派 DeepSeek subagent 独立执行完整导入+审阅+定稿"
     }
   }
 }
