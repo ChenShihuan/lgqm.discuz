@@ -98,8 +98,31 @@ python3 -m monitor.cli review-info <TARGET>
    - `[[Image:static/image/smiley/...]]` → 删除（论坛内置表情，非文章配图）
    - `[[Image:static/image/common/...]]` → 删除（论坛 UI 图标）
    - 连续空行 > 3 → 压缩为 2
+   - **长等号分隔线**：`=======`（≥5 个 `=`）会被 MediaWiki 解析为 h5/h6 标题，造成目录污染。应转为短横线 `---------`（9 个 `-`）：
+     ```python
+     # ≥5 个连续 = → 转为 9 个 -
+     content = re.sub(r'^={5,}\s*$', r'---------', content, flags=re.MULTILINE)
+     ```
    - `.raw.mw` 残留的 `{{PAGENAME}}` 占位符 → 替换为文章名
    - `<!--作者ID-->` 注释 → 删除
+   - **纯编码图片文件名残留**：`[[File:xxx.jpg]]` 后紧跟的 `'''文件名'''` 仅为无意义的原始文件名文本残留，应删除，仅保留 `[[File:...]]`。涵盖两类：
+     1. **Hash 文件名**：`6c224f4a20a44623bcb020840b8931090df3d715.jpeg`（32-40 位 hex）
+     2. **截图/相机标准命名**：`暴风截图202192410247281.jpg`、`微信图片_20230322001727.jpg`、`IMG_20230101.jpg`、`DSC0001.jpg`、`Screenshot_2023.png` 等
+     ```python
+     # 删除 [[File:xxx.jpg]] 后紧跟的 '''无意义文件名''' 残留
+     import re
+     patterns = [
+         r'[0-9a-f]{32,40}',              # hash 文件名
+         r'(暴风截图|微信图片|IMG_|DSC|Screenshot_|Photo_|PANO_)\S*',  # 截图/相机命名
+     ]
+     for p in patterns:
+         content = re.sub(
+             rf'\[\[File:([^\]]+)\]\]\s*\n\s*\'\'\'{p}\.[a-z]+\'\'\'',
+             r'[[File:\1]]',
+             content
+         )
+     )
+     ```
 
 4. **同人注释质量过滤**：见下方「同人注释规则」章节。
 
