@@ -335,6 +335,13 @@ class ForumSession:
             return True
         if "location.replace" in text:
             return True
+        # 变量名混淆版: 单 script，短页面，包含 getName 调用栈检测
+        # 这是 Discuz 反爬 JS 挑战的通用指纹，所有混淆变体都使用
+        # 格式: function getName(){var caller=getName.caller;...}
+        if len(text) < 3000 and "function getName" in text:
+            return True
+        if "getName.caller" in text:
+            return True
         return False
 
     @property

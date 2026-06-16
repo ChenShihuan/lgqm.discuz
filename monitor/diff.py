@@ -121,7 +121,11 @@ def verify_tid(tid: int, timeout: int = 10, use_auth: bool = True,
     Returns:
         (accessible: bool, source: str)
         source 取值: "thread" (论坛帖子), "article" (论坛文章), "" (不可访问)
+        注意：返回 True 仅表示页面可访问（含 JS 挑战保护的情况），
+        不保证能解析出正文内容。JS 挑战页面表示帖子确实存在，
+        只是需要浏览器执行 JS 后方可查看内容。
     """
+    import time as _time
     fs = get_forum_session()
 
     # 检测是否为 article 格式
@@ -129,47 +133,86 @@ def verify_tid(tid: int, timeout: int = 10, use_auth: bool = True,
 
     # article 格式：直接访问完整 URL 验证（article 页面无需 cookie 即可访问）
     if is_article_fmt:
-        try:
-            resp = fs.get(forum_url, referer=f"{BASE_URL}/", timeout=timeout)
-            if resp.status_code == 200 and not fs.is_js_challenge(resp.text):
-                if "提示信息" not in resp.text and "未定义操作" not in resp.text:
-                    if len(resp.text) > 500:
-                        return True, "article"
-                return False, ""
-        except Exception:
-            pass
+        had_js_challenge = False
+        for attempt in range(3):
+            try:
+                resp = fs.get(forum_url, referer=f"{BASE_URL}/", timeout=timeout)
+                if resp.status_code == 200:
+                    if fs.is_js_challenge(resp.text):
+                        # JS 挑战 → 帖子存在，只是需要浏览器执行 JS
+                        had_js_challenge = True
+                        if attempt < 2:
+                            _time.sleep(2)
+                        continue
+                    # 页面正常返回
+                    if "提示信息" not in resp.text and "未定义操作" not in resp.text:
+                        if len(resp.text) > 500:
+                            return True, "article"
+                    return False, ""
+                if attempt < 2:
+                    _time.sleep(2)
+            except Exception:
+                if attempt < 2:
+                    _time.sleep(2)
+        # 重试用尽：如果是 JS 挑战，判为有条件可访问
+        if had_js_challenge:
+            return True, "article"
         return False, ""
 
     # 以下仅处理 thread 格式
 
     # 优先尝试 Archiver（公开板块，轻量）
-    archiver_url = f"https://lgqmonline.top/archiver/?tid-{tid}.html"
-    try:
-        resp = fs.get(archiver_url, referer=f"{BASE_URL}/", timeout=timeout)
-        if resp.status_code == 200 and not fs.is_js_challenge(resp.text):
-            if 'class="author"' in resp.text or "class='author'" in resp.text:
-                return True, "thread"
-    except Exception:
-        pass
-
-    # Archiver 不可达，尝试用 cookie 访问 thread 页面（非公开板块）
-    if use_auth:
-        thread_url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
+    had_js_challenge = False
+    for attempt in range(3):
+        archiver_url = f"https://lgqmonline.top/archiver/?tid-{tid}.html"
         try:
-            resp = fs.get(thread_url, referer=f"{BASE_URL}/forum-39-1.html", timeout=timeout)
-            if resp.status_code == 200 and not fs.is_js_challenge(resp.text):
-                # 有作者信息或有帖子内容 → 可访问
-                if ('class="author"' in resp.text or "class='author'" in resp.text or
-                        'class="authi"' in resp.text or 'class="pi"' in resp.text):
+            resp = fs.get(archiver_url, referer=f"{BASE_URL}/", timeout=timeout)
+            if resp.status_code == 200:
+                if fs.is_js_challenge(resp.text):
+                    had_js_challenge = True
+                    if attempt < 2:
+                        _time.sleep(2)
+                    continue
+                if 'class="author"' in resp.text or "class='author'" in resp.text:
                     return True, "thread"
-                # 是"提示信息"页面且无帖子内容 → 不可访问
-                if "提示信息" in resp.text or "未定义操作" in resp.text:
-                    return False, ""
-                # 非提示信息页面 → 也算可访问
-                if "提示信息" not in resp.text:
-                    return True, "thread"
+                # Archiver 正常返回但没有作者 → 页面存在但内容受限
+                # 继续，不急于判定
         except Exception:
-            pass
+            if attempt < 2:
+                _time.sleep(2)
+
+    # Archiver 不可达或内容受限，尝试用 cookie 访问 thread 页面
+    if use_auth:
+        had_thread_js_challenge = False
+        for attempt in range(3):
+            thread_url = f"https://lgqmonline.top/thread-{tid}-1-1.html"
+            try:
+                resp = fs.get(thread_url, referer=f"{BASE_URL}/forum-39-1.html", timeout=timeout)
+                if resp.status_code == 200:
+                    if fs.is_js_challenge(resp.text):
+                        had_thread_js_challenge = True
+                        if attempt < 2:
+                            _time.sleep(2)
+                        continue
+                    # 有作者信息或有帖子内容 → 可访问
+                    if ('class="author"' in resp.text or "class='author'" in resp.text or
+                            'class="authi"' in resp.text or 'class="pi"' in resp.text):
+                        return True, "thread"
+                    # 是"提示信息"页面且无帖子内容 → 不可访问
+                    if "提示信息" in resp.text or "未定义操作" in resp.text:
+                        return False, ""
+                    # 非提示信息页面 → 也算可访问
+                    if "提示信息" not in resp.text:
+                        return True, "thread"
+                if attempt < 2:
+                    _time.sleep(2)
+            except Exception:
+                if attempt < 2:
+                    _time.sleep(2)
+
+        # 重试用尽：如果 consistently 遇到 JS 挑战，说明帖子存在但受保护
+        if had_thread_js_challenge:
+            return True, "thread"
 
     return False, ""
 
