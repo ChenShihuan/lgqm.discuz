@@ -304,7 +304,122 @@ def count_words_mw(filepath: str, dry_run: bool = False) -> dict:
     }
 
 
-# ============ 文章名处理 ============
+# ============ 图片格式检测 ============
+
+# 支持检测的图片格式及其 magic bytes
+_IMAGE_SIGNATURES = [
+    # (canonical_ext, mime_type, magic_bytes, offset)
+    ('webp', 'image/webp', b'RIFF', 0, b'WEBP', 8),   # RIFF....WEBP
+    ('png',  'image/png',  b'\x89PNG\r\n\x1a\n', 0),
+    ('jpg',  'image/jpeg', b'\xff\xd8', 0),
+    ('gif',  'image/gif',  b'GIF8', 0),                 # GIF87a or GIF89a
+    ('bmp',  'image/bmp',  b'BM', 0),
+    ('svg',  'image/svg+xml', b'<svg', 0),
+    ('svg',  'image/svg+xml', b'<?xml', 0),             # SVG 可能以 xml 声明开头
+]
+
+
+def detect_image_type(filepath: str) -> tuple:
+    """
+    通过 magic bytes 检测图片真实格式。
+
+    不依赖 imghdr（Python 3.13 已废弃）或 PIL（额外依赖）。
+    支持 JPEG, PNG, GIF, WebP, BMP, SVG。
+
+    Returns:
+        (canonical_ext, mime_type) 例如 ('jpg', 'image/jpeg'), ('webp', 'image/webp')
+        无法识别时返回 (None, None)
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(32)
+    except (IOError, OSError):
+        return (None, None)
+
+    for ext, mime, magic, offset, *rest in _IMAGE_SIGNATURES:
+        if len(header) < offset + len(magic):
+            continue
+        if header[offset:offset + len(magic)] == magic:
+            # WebP 需要额外验证：RIFF 后第 8-11 字节必须是 WEBP
+            if rest:
+                check_bytes, check_offset = rest
+                if len(header) >= check_offset + len(check_bytes):
+                    if header[check_offset:check_offset + len(check_bytes)] != check_bytes:
+                        continue
+            return (ext, mime)
+
+    # 回退：svg 也可能以 <?xml 开头
+    if header[:5] == b'<?xml':
+        # 在更大范围内搜索 svg 标记
+        try:
+            with open(filepath, 'rb') as f:
+                content = f.read(1024)
+            if b'<svg' in content[:512] or b'<SVG' in content[:512]:
+                return ('svg', 'image/svg+xml')
+        except (IOError, OSError):
+            pass
+
+    return (None, None)
+
+
+def fix_image_extension(filepath: str, dry_run: bool = False) -> dict:
+    """
+    检测图片扩展名是否与实际格式匹配，不匹配时修正扩展名。
+
+    同时处理 .jpeg → .jpg 规范化。
+
+    Args:
+        filepath: 图片文件路径
+        dry_run: 仅检测不实际重命名
+
+    Returns:
+        None 表示无需修正
+        {old_path, new_path, old_name, new_name, old_ext, new_ext, reason} 表示已/需修正
+    """
+    import os as _os
+
+    if not _os.path.isfile(filepath):
+        return None
+
+    dirname = _os.path.dirname(filepath)
+    basename = _os.path.basename(filepath)
+    stem, old_ext = _os.path.splitext(basename)
+    old_ext = old_ext.lower().lstrip('.')
+
+    real_ext, mime = detect_image_type(filepath)
+
+    if real_ext is None:
+        return None  # 无法识别格式，不修改
+
+    # 规范化 .jpeg → .jpg
+    if old_ext == 'jpeg' and real_ext == 'jpg':
+        new_name = f"{stem}.jpg"
+        new_path = _os.path.join(dirname, new_name)
+        result = {
+            'old_path': filepath, 'new_path': new_path,
+            'old_name': basename, 'new_name': new_name,
+            'old_ext': old_ext, 'new_ext': 'jpg',
+            'reason': f'规范化: .jpeg → .jpg'
+        }
+        if not dry_run:
+            _os.rename(filepath, new_path)
+        return result
+
+    # 实际格式不匹配
+    if old_ext != real_ext:
+        new_name = f"{stem}.{real_ext}"
+        new_path = _os.path.join(dirname, new_name)
+        result = {
+            'old_path': filepath, 'new_path': new_path,
+            'old_name': basename, 'new_name': new_name,
+            'old_ext': old_ext, 'new_ext': real_ext,
+            'reason': f'格式不匹配: .{old_ext} 实际为 {mime} → .{real_ext}'
+        }
+        if not dry_run:
+            _os.rename(filepath, new_path)
+        return result
+
+    return None
 
 def clean_article_name(title: str) -> str:
     """从论坛帖子标题生成 Wiki 文章名（去除标签、日期后缀等）"""
@@ -319,22 +434,34 @@ def clean_article_name(title: str) -> str:
             break
 
     # 去掉日期/更新后缀（括号包裹的优先处理）
-    # 如 "（26年4月6日更新至第42章）"、"（6.14更新"、"（0118 第42章 广州新城）"
+    # 如 "（26年4月6日更新至第42章）"、"（6.14更新"、"（0118 第42章 广州新城）"、"（12月29日 更新两节）"
     name = re.sub(r'[（(]\s*\d+年\d+月\d+日\s*更新.*[）)]\s*$', '', name)
     name = re.sub(r'[（(]\s*\d+年\d+月\d+日\s*(?:彩蛋|尾声).*[）)]\s*$', '', name)
-    name = re.sub(r'[（(]\s*\d{4}[\.\-]\d{1,2}[\.\-]\d{1,2}\s*更新?[）)]?\s*', '', name)
-    name = re.sub(r'[（(]\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?[）)]?\s*', '', name)
+    # M月D日 格式（无年份，括号包裹）：如 "（12月29日 更新两节  南下青州）"
+    name = re.sub(r'[（(]\s*\d{1,2}月\d{1,2}日\s*更新.*[）)]\s*$', '', name)
+    # M月D日 格式（无年份，括号包裹，彩蛋/尾声）：如 "（6月1日 彩蛋）"
+    name = re.sub(r'[（(]\s*\d{1,2}月\d{1,2}日\s*(?:彩蛋|尾声).*[）)]\s*$', '', name)
+    name = re.sub(r'[（(]\s*\d{4}[\.\-]\d{1,2}[\.\-]\d{1,2}\s*更新?(?:至?第?\w+章)?[）)]?\s*', '', name)
+    name = re.sub(r'[（(]\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至?第?\w+章)?[）)]?\s*', '', name)
     name = re.sub(r'[（(]\s*\d{4}\s*第\S+章.*[）)]\s*$', '', name)
     # 如 " 1.15更新第八案"、" 6.14更新"、" 0118 第42章"
     name = re.sub(r'\s*\d{4}[\.\-]\d{1,2}[\.\-]\d{1,2}\s*更新?.*$', '', name)
     name = re.sub(r'\s*\d{1,2}[\.\-]\d{1,2}[\.\-]?\d{0,2}\s*更新?(?:至第?\w+章)?.*$', '', name)
     name = re.sub(r'\s*\d+年\d+月\d+日\s*(?:更新|彩蛋|尾声).*$', '', name)
+    # M月D日 格式（无年份，无括号）：如 " 12月29日 更新两节"
+    name = re.sub(r'\s*\d{1,2}月\d{1,2}日\s*(?:更新|彩蛋|尾声).*$', '', name)
     name = re.sub(r'\s*更新至第?\w+章$', '', name)
+    # N楼K更格式：如 " 62楼5更"、" 12楼更新"
+    name = re.sub(r'\s*\d+楼\d*\s*更.*$', '', name)
+    # 大纲版本后缀：如 " 大纲3版"
+    name = re.sub(r'\s*大纲\d*\s*版\s*$', '', name)
 
     # 去掉完结/连载状态后缀：支持（完结）、【完结】等括号
     name = re.sub(r'\s*[（(【\[](?:已?完结|连载中|全文完|未完待续|更新中)[）)】\]]\s*$', '', name)
+    # 去掉文体标签后缀：如 "（短篇）"、"（中篇）"、"（长篇）"
+    name = re.sub(r'\s*[（(][^）)]*(?:短篇|中篇|长篇)[^）)]*[）)]\s*$', '', name)
 
-    # 去掉书名号《》
+    # 去掉书名号《》 — 注意: 主副标题语义连接（如 主标题——副标题）应在审阅阶段由 skill 处理
     name = re.sub(r'[《》]', '', name)
     name = name.strip()
 

@@ -43,7 +43,7 @@ python3 -m monitor.cli import {tid} --download-images
 输出目录格式: output/{tid}-<文章名>/
 
 **记录 CLI 输出的实际目录路径**（如 output/19392-圣历负一年的秘密/），后续步骤全部基于此路径。
-文章名从 CLI 输出中提取（如 "圣历负一年的秘密"）。
+文章名从 CLI 输出中提取（如 "圣历负一年的秘密"）作为初始 NAME，**但 NAME 可能在 Step 3 审阅中被修正**（见"修正文章名"项）。
 
 ### 第三步：审阅优化
 设 DIR=output/{tid}-<名称>，NAME=<名称>
@@ -66,7 +66,11 @@ python3 -m monitor.cli review-info DIR/text/NAME.raw.mw
 - [ ] 粗体标题（'''第X章 标题'''）→ == 标题 ==
 - [ ] 清理图片引用后的裸文件名粗体（[[File:xxx.jpg|600px]] 后面紧跟的 '''xxx.jpg'''）
 - [ ] 删除作者碎碎念、收款码、签名等非正文内容
-- [ ] 修正文章名（如有自定义标签等边缘情况）
+- [ ] **修正文章名**（重要！含以下语义判断）:
+    - `《主标题》副标题` → `主标题——副标题`（书名号包裹的为主标题，外部为副标题，用破折号连接）
+    - 仅有一个书名号标题且无副标题 → 去除书名号即可
+    - 确认 Infobox 中 `| 同人作品 =` 字段使用修正后的名称
+    - **如果文章名被修正，必须重命名 .mw 文件本身**（`mv DIR/text/旧名.mw DIR/text/新名.mw`）并更新后续步骤中的 NAME 变量
 
 **审阅规则详见 review-article.md 的 Step 2a-2i，严格按照其中的 Python 正则和规则执行。**
 
@@ -87,9 +91,9 @@ python3 -m monitor.cli word-count DIR/text/NAME.mw
 cp DIR/text/NAME.mw lgqm.huijiwiki.com/
 ```
 
-4c. 复制图片（如有）:
+4c. 上传图片（如有）:
 ```bash
-cp DIR/img/* output/img_sum/ 2>/dev/null
+python3 -m monitor.cli upload-images --dir DIR/img/
 ```
 
 4d. 更新同人作品列表:
@@ -124,7 +128,7 @@ print(f'作品列表已{action}: #{seq} [[{name}]]')
 - 所有 CLI 命令从项目根目录运行
 - .raw.mw = 导入原始输出（保留用于对比），.mw = 处理后的最终文件
 - Wiki 仓库在 lgqm.huijiwiki.com/ 目录（git-mediawiki remote）
-- 图片汇总到 output/img_sum/（所有文章图片集中存放）
+- 图片通过 upload-images 命令直接上传到 Wiki（自动格式检测修正）
 - 论坛凭据: data/local.json，Cookie: data/cookies.pkl
 - Infobox | 字数 = 由 python3 -m monitor.cli word-count 自动计算并写入
 - 格式转换规则见 CLAUDE.md 中的"格式转换规则"表格
@@ -194,7 +198,17 @@ print(f'作品列表已{action}: #{seq} [[{name}]]')
    - review 步骤失败 → 标注"审阅需人工处理"，.raw.mw 已生成可供后续手动审阅
    - 定稿步骤失败 → 标注具体失败步骤，已生成的 .mw 文件保留
 
-### Step 4: 清空队列
+### Step 4: 重建 Wiki 索引
+
+导入完成后，**必须重建 `wiki_index.json`**，确保后续监控不会重复识别已导入文章：
+
+```bash
+python3 -m monitor.cli index-wiki
+```
+
+> 此步骤只执行一次（非 per-article），在所有文章验证通过后运行。
+
+### Step 5: 清空队列
 
 所有文章处理完成后（无论成功失败），清空队列：
 
@@ -210,7 +224,7 @@ print('队列已清空')
 
 > 如需保留失败的条目以便重试，可在写入前过滤掉已成功的 TID，只保留失败的。
 
-### Step 5: 输出汇总
+### Step 6: 输出汇总
 
 以表格形式列出本次导入结果：
 
