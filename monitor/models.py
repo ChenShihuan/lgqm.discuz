@@ -82,19 +82,28 @@ class DiffReport:
         "new_threads": 0,
         "updated_threads": 0,
         "possible_matches": 0,
+        "confirmed_matches": 0,
         "verified_accessible": 0,
+        "verified_accessible_thread": 0,
+        "verified_accessible_article": 0,
+        "verified_accessible_auth": 0,
         "verified_inaccessible": 0,
     })
     new_items: List[DiffItem] = field(default_factory=list)
     updated_items: List[DiffItem] = field(default_factory=list)
     possible_matches: List[DiffItem] = field(default_factory=list)
+    confirmed_matches: List[DiffItem] = field(default_factory=list)
 
     def to_json(self, filepath: str):
         """保存为 JSON 文件"""
         import os
         os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+        data = asdict(self)
+        # asdict 把 confirmed_matches 放在 summary 之后，确认顺序
+        if 'confirmed_matches' not in data:
+            data['confirmed_matches'] = []
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(asdict(self), f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def _item_from_dict(self, item_data: dict) -> DiffItem:
         """从字典重建 DiffItem"""
@@ -143,4 +152,6 @@ class DiffReport:
             report.updated_items.append(report._item_from_dict(item_data))
         for item_data in data.get("possible_matches", []):
             report.possible_matches.append(report._item_from_dict(item_data))
+        for item_data in data.get("confirmed_matches", []):
+            report.confirmed_matches.append(report._item_from_dict(item_data))
         return report

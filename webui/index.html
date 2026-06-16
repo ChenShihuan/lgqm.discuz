@@ -77,6 +77,7 @@ a:hover{text-decoration:underline}
 <div class="tabs">
   <div class="tab on" data-tab="updated">更新帖 <span class="b" id="bnUpdated">0</span></div>
   <div class="tab" data-tab="new">新帖 <span class="b" id="bnNew">0</span></div>
+  <div class="tab" data-tab="confirmed">其他版块 <span class="b" id="bnConfirmed">0</span></div>
   <div class="tab" data-tab="possible">疑似匹配 <span class="b" id="bnPossible">0</span></div>
   <div class="tab" data-tab="wiki">Wiki 文章 <span class="b" id="bnWiki">0</span></div>
   <div class="tab" onclick="window.open('/preview.html','_blank')" style="background:#3498db;color:#fff">🔍 预览</div>
@@ -136,17 +137,18 @@ function updateQueueBadge(){
 function cards(){
   const s=D.summary||{};
   document.getElementById('cards').innerHTML=[
-    {n:s.total_forum_threads||0,l:'论坛帖子'},
+    {n:s.total_forum_threads||0,l:'论坛同人板块 (forum-39)'},
+    {n:(s.verified_accessible_thread||0)+' + '+(s.verified_accessible_article||0),l:'论坛其他板块 (帖子+文章)',c:'c3'},
     {n:s.total_wiki_articles||0,l:'Wiki 文章'},
     {n:(s.new_standard||0)+' / '+(s.new_video||0)+' / '+(s.new_other||0),l:'新帖 (原创/视频/其他)',c:'c1'},
     {n:s.updated_threads||0,l:'更新帖',c:'c2'},
     {n:s.possible_matches||0,l:'疑似匹配',c:'c2'},
-    {n:(s.verified_accessible||0)+' / '+(s.verified_inaccessible||0),l:'已验证 (可达/不可达)',c:'c3'},
   ].map(x=>`<div class="card${x.c?' '+x.c:''}"><div class="n">${x.n}</div><div class="l">${x.l}</div></div>`).join('')
 }
 function badges(){
   document.getElementById('bnUpdated').textContent=(D.updated_items||[]).length;
   document.getElementById('bnNew').textContent=(D.new_items||[]).length;
+  document.getElementById('bnConfirmed').textContent=(D.confirmed_matches||[]).length;
   document.getElementById('bnPossible').textContent=(D.possible_matches||[]).length;
   document.getElementById('bnWiki').textContent=W?W.total:0;
 }
@@ -160,7 +162,8 @@ function items(){
     if(cat==='standard')all=all.filter(i=>i.category==='standard');
     else if(cat==='video')all=all.filter(i=>i.category==='video');
     else if(cat==='other')all=all.filter(i=>i.category==='other');
-  }else if(tab==='possible')all=D.possible_matches||[];
+  }else if(tab==='confirmed')all=D.confirmed_matches||[];
+  else if(tab==='possible')all=D.possible_matches||[];
   else if(tab==='wiki'){
     if(!W)return[];
     all=(W.articles||[]).map(a=>({_wiki:true,...a}));
@@ -215,6 +218,18 @@ function render(){
           <button class="btn" style="background:${inQ?'#e8f5e9':'#e8f0fe'};color:${inQ?'#2e7d32':'#1967d2'};padding:3px 10px;font-size:12px" onclick="toggleQueue(${t.tid})">${inQ?'已加入队列':'加入队列'}</button>
           <button class="btn" style="background:${i.skipped?'#e8f5e9':'#fafafa'};color:${i.skipped?'#2e7d32':'#999'};padding:3px 8px;font-size:12px;margin-left:4px" onclick="skipToggle(${t.tid})">${i.skipped?'取消':'跳过'}</button>
         </td></tr>`;
+    }
+  }else if(tab==='confirmed'){
+    h='<table><tr><th>TID</th><th>Wiki 标题</th><th>文件名</th><th>格式</th><th>来源</th><th>原因</th></tr>';
+    for(const i of pp){
+      const t=i.forum_thread||{},w=i.wiki_article||{};
+      const isArticle=i.reason&&i.reason.includes('文章');
+      const isAuth=i.reason&&i.reason.includes('非公开');
+      const fmt=isArticle?'<span class="tag" style="background:#e8f5e9;color:#2e7d32">文章</span>':'<span class="tag" style="background:#e3f2fd;color:#1565c0">帖子</span>';
+      const src=isAuth?'<span class="tag tag-up">需登录</span>':'<span class="tag tag-ok">公开</span>';
+      h+=`<tr><td><a href="${forumUrl(t.url||'')}" target="_blank">${t.tid}</a></td>
+        <td>${esc(w.title||t.title||'-')}</td><td>${w.filename||'-'}</td>
+        <td>${fmt}</td><td>${src}</td><td><small>${i.reason||''}</small></td></tr>`;
     }
   }else if(tab==='possible'){
     h='<table><tr><th>TID</th><th>论坛标题</th><th>Wiki 候选</th><th>文件名</th><th>置信度</th><th>验证</th><th>原因</th></tr>';

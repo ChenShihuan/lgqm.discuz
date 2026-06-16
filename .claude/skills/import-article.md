@@ -39,7 +39,7 @@ model: haiku
    a. **标准 PID 链接格式**：`[url pid=数字 章节名]`
       例：`[https://lgqmonline.top/...pid=532634763&fromuid=19550 一 南海案]`
       → extract pid and chapter_name. PID数字部分作为映射key.
-      注意：旧域名 `lgqm.gq` 的链接也有效。
+      注意：帖子内原有的 `lgqm.top`、`lgqm.gq`、`www.lgqm.top`旧地址需要替换为新地址`lgqmonline.top`。
 
    b. **`XX楼 标题` 楼层列表**：无链接，仅楼层号+章节名
       例：`14楼    关于1637式步枪` / `12楼更新第二章`

@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .config import get, tid_text_dir
 from .models import Post
-from .utils import log, slugify
+from .utils import log, slugify, normalize_forum_domains
 
 # 模块级变量：存储最近一次转换中被过滤的章节标题和 TOC 信息（供 CLI 输出复核清单）
 last_merged_titles = []
@@ -127,7 +127,8 @@ def html_to_wiki(html: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)  # 最多连续两个换行
     text = text.strip()
 
-    return text
+    # 强制替换旧域名为 lgqmonline.top
+    return normalize_forum_domains(text)
 
 
 def convert_post(post: Post, config: dict = None) -> str:
@@ -758,6 +759,8 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
     parts.append("[[分类:同人作品]]")
 
     result = "\n\n".join(parts)
+    # 强制替换旧域名为 lgqmonline.top
+    result = normalize_forum_domains(result)
     # 存储被合并标题 + TOC 匹配信息供 CLI 输出复核
     global last_merged_titles, _last_toc_info
     last_merged_titles = merged_titles
@@ -796,7 +799,7 @@ def save_wiki_file(content: str, filename: str, output_dir: str = None,
     filepath = os.path.join(output_dir, f"{safe_name}.mw")
 
     with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(content)
+        f.write(normalize_forum_domains(content))
 
     log(f"Wiki 文件已保存: {filepath}", "SUCCESS")
     return filepath
@@ -913,4 +916,5 @@ def update_existing_wiki(existing_content: str, new_posts: List[Post],
         result += "\n\n" + "\n\n".join(new_parts)
     result += "\n" + tail.strip()
 
-    return result
+    # 强制替换旧域名为 lgqmonline.top
+    return normalize_forum_domains(result)

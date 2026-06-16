@@ -23,7 +23,10 @@ THREAD_URL_PATTERNS = [
 ]
 
 # Discuz 论坛域名变体
-FORUM_DOMAINS = {'lgqmonline.top', 'lgqmonline.top', 'lgqmonline.top', 'lgqmonline.top', 'lgqm.online'}
+FORUM_DOMAINS = {'lgqmonline.top', 'lgqm.online'}
+
+# 旧域名 → 新域名的映射（拉取/转换时自动替换）
+OLD_FORUM_DOMAINS = ['www.lgqm.top', 'lgqm.gq', 'lgqm.top']
 
 
 def extract_tid(url: str) -> Optional[int]:
@@ -74,9 +77,12 @@ def normalize_forum_url(url: str, base_url: str = "https://lgqmonline.top") -> s
     if not url:
         return ""
     url = url.strip()
-    for domain in FORUM_DOMAINS:
-        if domain in url:
-            # 提取路径部分
+    # 先检查是否已经是目标域名
+    if 'lgqmonline.top' in url:
+        return url
+    # 替换旧域名
+    for old_domain in OLD_FORUM_DOMAINS:
+        if old_domain in url:
             try:
                 parsed = urlparse(url)
                 path_query = parsed.path
@@ -86,6 +92,25 @@ def normalize_forum_url(url: str, base_url: str = "https://lgqmonline.top") -> s
             except Exception:
                 pass
     return url
+
+
+def normalize_forum_domains(text: str) -> str:
+    """
+    替换文本中所有旧论坛域名为 lgqmonline.top。
+
+    覆盖的旧域名：
+    - www.lgqm.top
+    - lgqm.gq
+    - lgqm.top
+
+    用于拉取/转换文章时自动修正，以及批量更新存量 .mw 文件。
+    """
+    if not text:
+        return text
+    # 按长度降序排列，确保先匹配长域名（避免 lgqm.top 先替换了 www.lgqm.top 中的部分）
+    for old_domain in sorted(OLD_FORUM_DOMAINS, key=len, reverse=True):
+        text = text.replace(old_domain, 'lgqmonline.top')
+    return text
 
 
 # ============ 日期处理 ============

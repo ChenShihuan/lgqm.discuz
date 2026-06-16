@@ -415,6 +415,61 @@ def cmd_preanalyze(args):
 level: 1=卷/案(顶层), 2=标准章节(默认), 3=子章节""")
 
 
+def cmd_normalize_domains(args):
+    """批量替换 .mw 文件中的旧论坛域名为 lgqmonline.top"""
+    import os as _os, glob as _glob
+    from monitor.utils import normalize_forum_domains, OLD_FORUM_DOMAINS
+
+    target_dir = args.path
+    if target_dir is None:
+        target_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "lgqm.huijiwiki.com")
+
+    if not _os.path.isdir(target_dir):
+        print(f"错误：目录不存在: {target_dir}")
+        return
+
+    mw_files = _glob.glob(_os.path.join(target_dir, "*.mw"))
+    if not mw_files:
+        print(f"目录中没有 .mw 文件: {target_dir}")
+        return
+
+    print(f"扫描 {len(mw_files)} 个 .mw 文件...")
+    print(f"旧域名: {', '.join(OLD_FORUM_DOMAINS)}")
+    print(f"新域名: lgqmonline.top")
+    print()
+
+    total_files = 0
+    total_replacements = 0
+
+    for filepath in sorted(mw_files):
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        new_content = normalize_forum_domains(content)
+        if new_content != content:
+            total_files += 1
+            # 统计替换次数
+            changes = 0
+            for old_domain in OLD_FORUM_DOMAINS:
+                changes += content.count(old_domain)
+            total_replacements += changes
+
+            filename = _os.path.basename(filepath)
+            if args.dry_run:
+                print(f"  📄 {filename}: {changes} 处旧域名")
+            else:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"  ✅ {filename}: {changes} 处已替换")
+
+    print()
+    if args.dry_run:
+        print(f"⚠️  --dry-run 模式：发现 {total_files} 个文件、{total_replacements} 处旧域名（未修改）")
+        print(f"   执行 python3 -m monitor.cli normalize-domains 实际修改")
+    else:
+        print(f"✅ 完成：{total_files} 个文件、{total_replacements} 处旧域名已替换为 lgqmonline.top")
+
+
 def cmd_img_sum(args):
     """归集 output/*/img/ 下的图片到 output/img_sum/"""
     import os, shutil
@@ -434,6 +489,80 @@ def cmd_img_sum(args):
 
     total = len(os.listdir(dst))
     print(f"已归集 {count} 张新图片，img_sum 共 {total} 张")
+
+
+def cmd_confirm_match(args):
+    """人工确认疑似匹配为有效匹配"""
+    from monitor.diff import confirm_match_manually, format_report_summary
+    from monitor.models import DiffReport
+
+    report = DiffReport.from_json("data/diff_report.json")
+
+    if args.tid:
+        # 确认单个 TID
+        ok = confirm_match_manually(report, args.tid)
+        if ok:
+            report.to_json("data/diff_report.json")
+            print(f"✅ TID={args.tid} 已确认为有效匹配")
+        else:
+            print(f"❌ 未找到 TID={args.tid}")
+    elif args.all:
+        # 批量确认所有 possible_matches
+        tids = []
+        for item in list(report.possible_matches):
+            item_tid = item.wiki_article.forum_tid if item.wiki_article else item.forum_thread.tid
+            if item_tid:
+                tids.append(item_tid)
+        if tids:
+            for tid in tids:
+                confirm_match_manually(report, tid)
+            report.to_json("data/diff_report.json")
+            print(f"✅ 已确认 {len(tids)} 条匹配")
+        else:
+            print("没有待确认的疑似匹配")
+    else:
+        # 交互模式：列出疑似匹配，让用户选择
+        if not report.possible_matches:
+            print("没有待确认的疑似匹配")
+            return
+
+        print(f"待确认的疑似匹配 ({len(report.possible_matches)} 条):\n")
+        for i, item in enumerate(report.possible_matches, 1):
+            w = item.wiki_article
+            tid = w.forum_tid if w else item.forum_thread.tid
+            print(f"  {i:>2}. [TID={tid}] {w.title if w else '?'}")
+            print(f"      {w.forum_url if w else ''}")
+        print()
+        print("输入序号确认（多个用逗号分隔，a=全部，q=退出）: ", end="")
+        choice = input().strip()
+
+        if choice.lower() == 'q':
+            return
+        elif choice.lower() == 'a':
+            tids = []
+            for item in report.possible_matches:
+                item_tid = item.wiki_article.forum_tid if item.wiki_article else item.forum_thread.tid
+                if item_tid:
+                    tids.append(item_tid)
+            for tid in tids:
+                confirm_match_manually(report, tid)
+            report.to_json("data/diff_report.json")
+            print(f"✅ 已确认全部 {len(tids)} 条匹配")
+        else:
+            indices = [int(x.strip()) for x in choice.split(",") if x.strip().isdigit()]
+            confirmed = 0
+            for idx in indices:
+                if 1 <= idx <= len(report.possible_matches):
+                    item = report.possible_matches[idx - 1]
+                    tid = item.wiki_article.forum_tid if item.wiki_article else item.forum_thread.tid
+                    if tid and confirm_match_manually(report, tid):
+                        confirmed += 1
+            if confirmed > 0:
+                report.to_json("data/diff_report.json")
+                print(f"✅ 已确认 {confirmed} 条匹配")
+
+    print()
+    print(format_report_summary(report))
 
 
 def cmd_match_titles(args):
@@ -640,6 +769,11 @@ def main():
     p_wb = subparsers.add_parser("webui", help="启动本地看板服务器")
     p_wb.add_argument("--port", type=int, default=8080, help="监听端口 (默认 8080)")
 
+    # confirm-match
+    p_cm = subparsers.add_parser("confirm-match", help="人工确认疑似匹配为有效匹配")
+    p_cm.add_argument("tid", type=int, nargs="?", help="要确认的帖子 TID（不指定则交互模式）")
+    p_cm.add_argument("--all", action="store_true", help="批量确认所有疑似匹配")
+
     # match-titles
     p_mt = subparsers.add_parser("match-titles", help="标题匹配搬运文章")
     p_mt.add_argument("--dry-run", action="store_true", help="仅预览匹配结果")
@@ -657,6 +791,12 @@ def main():
     # preanalyze
     p_pa = subparsers.add_parser("preanalyze", help="预分析帖子目录结构")
     p_pa.add_argument("tid", type=int, help="帖子 TID")
+
+    # normalize-domains
+    p_nd = subparsers.add_parser("normalize-domains", help="批量替换 .mw 文件中的旧论坛域名")
+    p_nd.add_argument("path", type=str, nargs="?", default=None,
+                      help="目标目录路径（默认 lgqm.huijiwiki.com）")
+    p_nd.add_argument("--dry-run", action="store_true", help="仅预览，不实际修改")
 
     # img-sum
     p_is = subparsers.add_parser("img-sum", help="归集 output/*/img/ 图片到 output/img_sum/")
@@ -680,9 +820,11 @@ def main():
         "review-info": cmd_review_info,
         "update": cmd_update,
         "renumber-list": cmd_renumber_list,
+        "confirm-match": cmd_confirm_match,
         "match-titles": cmd_match_titles,
         "word-count": cmd_word_count,
         "preanalyze": cmd_preanalyze,
+        "normalize-domains": cmd_normalize_domains,
         "img-sum": cmd_img_sum,
         "webui": cmd_webui,
     }
