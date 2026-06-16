@@ -12,6 +12,7 @@ html/
 
 # 生成的输出文件（含图片 img/ 子目录）
 output/
+output*/
 
 # Python
 __pycache__/

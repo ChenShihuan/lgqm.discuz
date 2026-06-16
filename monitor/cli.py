@@ -221,6 +221,18 @@ def cmd_import(args):
         else:
             print("无图片或下载失败")
 
+        # Step 5b: 上传图片到 Wiki
+        if args.upload_images and images:
+            print("\n--- 上传图片到 Wiki ---")
+            img_dir = tid_img_dir(tid, safe_name)
+            if _os.path.isdir(img_dir) and _os.listdir(img_dir):
+                from monitor.wiki_uploader import pw_upload_images
+                result = pw_upload_images(img_dir=img_dir, wiki_domain="lgqm",
+                                         skip_existing=True, verbose=True)
+                print(f"上传: {result['uploaded']}/{result['total']} 张图片")
+            else:
+                print("无图片可上传")
+
     # Step 6: 统计信息
     _print_stats(raw_content, article_name, images)
     _print_suggestions(wiki_content, article_name, images)
@@ -468,6 +480,75 @@ def cmd_normalize_domains(args):
         print(f"   执行 python3 -m monitor.cli normalize-domains 实际修改")
     else:
         print(f"✅ 完成：{total_files} 个文件、{total_replacements} 处旧域名已替换为 lgqmonline.top")
+
+
+def cmd_upload_images(args):
+    """上传图片到灰机 Wiki"""
+    from monitor.wiki_uploader import pw_upload_images
+    import os as _os
+
+    img_dir = args.dir
+    if img_dir is None:
+        # 默认扫描 output/*/img/
+        img_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "output")
+
+    if not _os.path.isdir(img_dir):
+        print(f"错误：目录不存在: {img_dir}")
+        return
+
+    result = pw_upload_images(
+        img_dir=img_dir,
+        wiki_domain=args.wiki,
+        skip_existing=not args.force,
+        dry_run=args.dry_run,
+        verbose=True,
+    )
+
+    if not args.dry_run:
+        print()
+        print(f"--- 上传汇总 ---")
+        print(f"总计: {result['total']}")
+        print(f"已上传: {result['uploaded']}")
+        print(f"已跳过: {result['skipped']}")
+        print(f"失败: {result['failed']}")
+        if result.get('renamed'):
+            print(f"格式修正: {result['renamed']} 个文件")
+        if result.get('mw_updated'):
+            print(f".mw 引用更新: {result['mw_updated']} 个文件")
+        if result.get('errors'):
+            print(f"\n失败详情:")
+            for err in result['errors']:
+                print(f"  - {err['filename']}: {err['reason']}")
+
+
+def cmd_fix_image_extensions(args):
+    """检测并修正图片扩展名"""
+    from monitor.wiki_uploader import _scan_image_dirs
+    from monitor.utils import fix_image_extension
+
+    img_dir = args.dir
+    if img_dir is None:
+        import os as _os
+        img_dir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "output")
+
+    images = _scan_image_dirs(img_dir)
+    if not images:
+        print("未找到图片文件")
+        return
+
+    print(f"扫描到 {len(images)} 张图片")
+    if args.dry_run:
+        print("⚠️  --dry-run 模式：仅预览，不实际修改\n")
+
+    fixed = 0
+    for filepath in images:
+        result = fix_image_extension(filepath, dry_run=args.dry_run)
+        if result:
+            fixed += 1
+            print(f"  🔧 {result['old_name']} → {result['new_name']}")
+            print(f"     {result['reason']}")
+
+    print(f"\n{'将' if args.dry_run else '已'}修正 {fixed} 个文件")
 
 
 def cmd_img_sum(args):
@@ -750,6 +831,7 @@ def main():
     p_im.add_argument("--update-list", action="store_true", help="更新同人作品列表")
     p_im.add_argument("--toc-file", type=str, default=None,
                       help="预分析的 TOC JSON 文件路径")
+    p_im.add_argument("--upload-images", action="store_true", help="下载图片后上传到 Wiki")
 
     # fetch-images
     p_fi = subparsers.add_parser("fetch-images", help="下载帖子图片")
@@ -801,6 +883,20 @@ def main():
     # img-sum
     p_is = subparsers.add_parser("img-sum", help="归集 output/*/img/ 图片到 output/img_sum/")
 
+    # upload-images
+    p_ui = subparsers.add_parser("upload-images", help="上传本地图片到灰机 Wiki")
+    p_ui.add_argument("--dir", type=str, default=None,
+                      help="图片目录（默认扫描 output/*/img/）")
+    p_ui.add_argument("--force", action="store_true", help="覆盖 Wiki 已有图片")
+    p_ui.add_argument("--wiki", type=str, default="lgqm", help="Wiki 子域名 (默认 lgqm)")
+    p_ui.add_argument("--dry-run", action="store_true", help="仅预览，不实际上传")
+
+    # fix-image-extensions
+    p_fe = subparsers.add_parser("fix-image-extensions", help="检测并修正图片扩展名（不上传）")
+    p_fe.add_argument("--dir", type=str, default=None,
+                      help="图片目录（默认扫描 output/*/img/）")
+    p_fe.add_argument("--dry-run", action="store_true", help="仅预览，不实际重命名")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -825,6 +921,8 @@ def main():
         "word-count": cmd_word_count,
         "preanalyze": cmd_preanalyze,
         "normalize-domains": cmd_normalize_domains,
+        "upload-images": cmd_upload_images,
+        "fix-image-extensions": cmd_fix_image_extensions,
         "img-sum": cmd_img_sum,
         "webui": cmd_webui,
     }
