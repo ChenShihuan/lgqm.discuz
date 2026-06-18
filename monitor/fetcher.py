@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from .config import get, tid_img_dir
 from .models import Post, ForumThread
-from .utils import log, rate_limit, set_verbose, clean_html
+from .utils import log, rate_limit, set_verbose, clean_html, detect_image_type
 from .session import get_forum_session, BASE_URL
 from .pw_fetcher import pw_get_html
 
@@ -361,10 +361,11 @@ def _fetch_thread_regular(tid: int, verbose: bool = False, max_floors: int = Non
     return posts
 
 
-def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> List[dict]:
+def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> dict:
     """
     从帖子所有页面拉取附件图片。
     扫描全部页（图片可能散布在各页中），通过 Playwright 获取 HTML。
+    下载后自动检测图片真实格式并修正扩展名。
 
     Args:
         tid: 帖子ID
@@ -372,7 +373,7 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
         verbose: 详细日志
 
     Returns:
-        图片信息列表 [{url, filename, local_path}]
+        {"images": [{url, filename, local_path}], "rename_map": {old_name: new_name}}
     """
     set_verbose(verbose)
 
@@ -385,14 +386,45 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
         from lxml import etree
     except ImportError:
         log("图片下载需要 lxml 库: pip install lxml", "WARN")
-        return []
+        return {"images": [], "rename_map": {}}
 
     fs = get_forum_session()
     fs.ensure_logged_in()
 
     images = []
+    rename_map = {}  # old_filename → new_filename
     seen = set()  # 去重
     page = 1
+
+    def _check_and_fix_ext(filepath: str, fname: str):
+        """检测图片真实格式，不匹配时重命名并记录映射"""
+        real_ext, _mime = detect_image_type(filepath)
+        if not real_ext:
+            return filepath, fname
+        stem, old_ext = os.path.splitext(fname)
+        old_ext = old_ext.lower().lstrip('.')
+        # 规范化 .jpeg → .jpg
+        if old_ext == 'jpeg' and real_ext == 'jpg':
+            new_name = f"{stem}.jpg"
+            new_path = os.path.join(os.path.dirname(filepath), new_name)
+            if new_path != filepath:
+                os.rename(filepath, new_path)
+                rename_map[fname] = new_name
+                if verbose:
+                    log(f"  🔧 {fname} → {new_name} (规范化 .jpeg→.jpg)", "INFO")
+                return new_path, new_name
+            return filepath, fname
+        # 实际格式不匹配
+        if old_ext and old_ext != real_ext:
+            new_name = f"{stem}.{real_ext}"
+            new_path = os.path.join(os.path.dirname(filepath), new_name)
+            if new_path != filepath:
+                os.rename(filepath, new_path)
+                rename_map[fname] = new_name
+                if verbose:
+                    log(f"  🔧 {fname} → {new_name} ({old_ext}→{real_ext})", "INFO")
+                return new_path, new_name
+        return filepath, fname
 
     while True:
         url = f"https://lgqmonline.top/thread-{tid}-{page}-1.html"
@@ -462,8 +494,9 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
 
             local_path = os.path.join(output_dir, filename)
 
-            # 跳过已下载的
+            # 跳过已下载的（但仍需检测格式修正）
             if os.path.exists(local_path):
+                local_path, filename = _check_and_fix_ext(local_path, filename)
                 images.append({
                     "url": img_url, "filename": filename, "local_path": local_path,
                 })
@@ -476,6 +509,8 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
                 if img_resp.status_code == 200 and len(img_resp.content) > 100:
                     with open(local_path, 'wb') as f:
                         f.write(img_resp.content)
+                    # 检测真实格式并修正扩展名
+                    local_path, filename = _check_and_fix_ext(local_path, filename)
                     images.append({
                         "url": img_url,
                         "filename": filename,
@@ -495,7 +530,7 @@ def fetch_images(tid: int, output_dir: str = None, verbose: bool = False) -> Lis
         page += 1
 
     log(f"图片拉取完成：共 {len(images)} 张（{page} 页）", "SUCCESS" if images else "INFO")
-    return images
+    return {"images": images, "rename_map": rename_map}
 
 
 def _extract_filename(src: str) -> str:
@@ -517,10 +552,13 @@ def fetch_thread_with_images(tid: int, download_images: bool = True,
     一次性拉取帖子内容和图片
 
     Returns:
-        (posts: List[Post], images: List[dict])
+        (posts: List[Post], images: List[dict], rename_map: dict)
     """
     posts = fetch_thread(tid, verbose=verbose)
     images = []
+    rename_map = {}
     if download_images:
-        images = fetch_images(tid, verbose=verbose)
-    return posts, images
+        result = fetch_images(tid, verbose=verbose)
+        images = result["images"]
+        rename_map = result["rename_map"]
+    return posts, images, rename_map

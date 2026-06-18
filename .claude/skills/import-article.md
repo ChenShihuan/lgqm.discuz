@@ -144,20 +144,19 @@ Converter 自动处理：
 python3 -m monitor.cli word-count <TARGET_DIR>/text/<NAME>.mw
 ```
 
-#### 3b: 复制到 Wiki 仓库 + 上传图片
+#### 3b: 上传图片 + 复制到 Wiki 仓库
 
 ```bash
-# TARGET_DIR 为 TARGET 的父目录（如 output/22085-淞沪启明同人/）
-cp <TARGET_DIR>/text/<NAME>.mw lgqm.huijiwiki.com/
-```
-
-如 `img/` 目录下有图片，直接上传到灰机 Wiki（自动检测格式并修正扩展名）：
-
-```bash
+# 先上传图片（自动检测格式并修正扩展名，同步更新 .mw 引用）
 python3 -m monitor.cli upload-images --dir <TARGET_DIR>/img/
 ```
 
-> **注意**: `TARGET_DIR` 为 `TARGET` 所在目录（`dirname TARGET`），内含 `text/` 和 `img/` 子目录。
+```bash
+# 再将更新后的 .mw 复制到 Wiki 仓库
+cp <TARGET_DIR>/text/<NAME>.mw lgqm.huijiwiki.com/
+```
+
+> **注意**: 必须**先上传图片后复制** .mw 文件。上传图片时会检测真实格式并修正扩展名，同步更新 `output/` 中的 .mw 引用。复制到 Wiki 仓库应在更新之后执行，确保引用与实际文件名一致。
 > **图片上传**: 使用 Playwright 绕过 Cloudflare → Bot 登录 → 检测真实格式 → 修正扩展名 → 上传。`.mw` 中的 `[[File:xxx.jpg]]` 引用会自动更新。
 
 复制完成后，更新同人作品列表：

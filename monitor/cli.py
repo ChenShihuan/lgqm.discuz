@@ -212,9 +212,15 @@ def cmd_import(args):
     images = []
     if args.download_images:
         print("--- 下载图片 ---")
-        images = fetch_images(tid, output_dir=tid_img_dir(tid, safe_name), verbose=True)
+        result = fetch_images(tid, output_dir=tid_img_dir(tid, safe_name), verbose=True)
+        images = result["images"]
+        rename_map = result.get("rename_map", {})
         if images:
             print(f"下载了 {len(images)} 张图片")
+            if rename_map:
+                print(f"🔧 已修正 {len(rename_map)} 个文件扩展名")
+                # 立即更新 .mw 文件中的图片引用
+                _apply_rename_map_to_mw_files(rename_map, _os.path.dirname(filepath))
             if len(images) == 1:
                 img_file = _os.path.basename(images[0].get("local_path", ""))
                 print(f"💡 建议在 Infobox 图像字段填入: [[Image:{img_file}|class=img-responsive]]")
@@ -260,6 +266,47 @@ def _sanitize_filename(name: str) -> str:
     # 去掉首尾空格和点
     name = name.strip('. ')
     return name if name else "untitled"
+
+
+def _apply_rename_map_to_mw_files(rename_map: dict, text_dir: str):
+    """
+    更新 .mw 文件中重命名图片的 [[File:...]] 引用。
+
+    仅在 [[File:xxx|...]] wikitext 标签内替换，避免误伤正文中的普通文本。
+
+    Args:
+        rename_map: {old_filename: new_filename}
+        text_dir: 包含 .mw 和 .raw.mw 文件的目录
+    """
+    import re as _re, glob as _glob, os as _os
+
+    if not rename_map:
+        return
+
+    mw_files = _glob.glob(_os.path.join(text_dir, "*.mw"))
+    for mw_path in mw_files:
+        with open(mw_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        new_content = content
+        changed = False
+        for old_name, new_name in rename_map.items():
+            if old_name not in new_content:
+                continue
+            # 仅在 [[File:xxx|...]] 或 [[File:xxx]] 中替换
+            pattern = _re.compile(
+                rf'\[\[File:{_re.escape(old_name)}(\||\])'
+            )
+            replacement = f'[[File:{new_name}\\1'
+            new_text = pattern.sub(replacement, new_content)
+            if new_text != new_content:
+                changed = True
+                new_content = new_text
+
+        if changed:
+            with open(mw_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            print(f"  📝 {_os.path.basename(mw_path)}: 已更新 {len(rename_map)} 处图片引用")
 
 
 def _print_suggestions(content: str, article_name: str, images: list):
@@ -372,9 +419,13 @@ def cmd_fetch_images(args):
         output_dir = _os.path.join(base, "img")
         print(f"📂 输出目录: {output_dir}")
 
-    images = fetch_images(tid, output_dir=output_dir, verbose=True)
+    result = fetch_images(tid, output_dir=output_dir, verbose=True)
+    images = result["images"]
     if images:
         print(f"下载了 {len(images)} 张图片")
+        rename_map = result.get("rename_map", {})
+        if rename_map:
+            print(f"🔧 已修正 {len(rename_map)} 个文件扩展名")
     else:
         print("无图片或下载失败")
 
@@ -763,9 +814,15 @@ def cmd_update(args):
     # 下载图片
     if args.download_images:
         print("--- 下载图片 ---")
-        images = fetch_images(tid, output_dir=tid_img_dir(tid, article_name), verbose=True)
+        result = fetch_images(tid, output_dir=tid_img_dir(tid, article_name), verbose=True)
+        images = result["images"]
         if images:
             print(f"下载了 {len(images)} 张图片")
+            rename_map = result.get("rename_map", {})
+            if rename_map:
+                print(f"🔧 已修正 {len(rename_map)} 个文件扩展名")
+                # 更新 .mw 文件中的图片引用
+                _apply_rename_map_to_mw_files(rename_map, _os.path.dirname(new_filepath))
 
     print("--- 更新后内容预览（前 500 字）---")
     print(new_content[:500])
