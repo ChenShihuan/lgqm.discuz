@@ -1,3 +1,4 @@
+
 # lgqm.discuz — 临高启明论坛同人监控与 Wiki 同步系统
 
 自动监控 [临高启明论坛](https://lgqmonline.top)「同人发布」板块（forum-39），对比 [灰机 Wiki](https://lgqm.huijiwiki.com) 已有同人文章，发现新帖和更新，支持一键拉取、格式转换、预览渲染。
@@ -85,6 +86,8 @@ VS Code 内 `Ctrl+Shift+P` → `Developer: Reload Window` 后生效：
 - **监控面板**：底部状态栏 `📊 监控面板` → 在 VS Code 内嵌标签页打开看板
 - **.mw 预览**：打开 `.mw` 文件 → 编辑器标题栏 `🔍 预览` 按钮 → 右侧 WebView 渲染
 
+![预览功能](doc/img/预览功能.png)
+
 ### WebUI 看板
 
 ```bash
@@ -93,12 +96,14 @@ python3 -m monitor.cli webui
 
 浏览器访问 `http://127.0.0.1:8080/`，功能：
 
-| Tab | 功能 |
-|-----|------|
-| 更新帖 / 新帖 | 分类浏览差异报告，支持类别筛选（标准/视频/其他） |
-| 疑似匹配 | 标题相似但 TID 不同的搬运文章 |
-| Wiki 文章 | 查看已收录文章，按 TID 有无筛选、按日期排序 |
-| 预览 | 在线 Wiki 渲染预览（粘贴 wikitext 或加载 .mw 文件） |
+| Tab           | 功能                                                |
+| ------------- | --------------------------------------------------- |
+| 更新帖 / 新帖 | 分类浏览差异报告，支持类别筛选（标准/视频/其他）    |
+| 疑似匹配      | 标题相似但 TID 不同的搬运文章                       |
+| Wiki 文章     | 查看已收录文章，按 TID 有无筛选、按日期排序         |
+| 预览          | 在线 Wiki 渲染预览（粘贴 wikitext 或加载 .mw 文件） |
+
+![论坛监控](doc/img/论坛监控.png)
 
 ### DeepSeek Subagent（可选）
 
@@ -112,17 +117,19 @@ curl -sSL https://raw.githubusercontent.com/PsChina/deepseek-as-subagent/main/cu
 # ~/.deepseek-mcp/config.json → 填写 api_key（从 platform.deepseek.com 获取）
 ```
 
+![批量导入](doc/img/批量导入.png)
+
 ### Claude Code Skills
 
-| 触发词 | 功能 |
-|-------|------|
-| "监控论坛" | 扫描 forum-39，对比 Wiki，生成差异报告 |
-| "查看差异" | 浏览差异报告详情 |
-| "导入 \<tid\>" | 拉取帖子 + 下载图片 → .raw.mw + .mw |
-| "审阅 \<文章名\>" | 交互式优化：Infobox、章节、注释、段落 |
-| "更新 \<tid\>" | 增量更新已有 Wiki 文章 |
-| "/import-queue" | 读取队列，并行分派 DeepSeek subagent 独立执行完整导入+审阅+定稿 |
-| "/ds \<任务\>" | 显式派工给 DeepSeek subagent（绕过自动决策） |
+| 触发词           | 功能                                                            |
+| ---------------- | --------------------------------------------------------------- |
+| "监控论坛"       | 扫描 forum-39，对比 Wiki，生成差异报告                          |
+| "查看差异"       | 浏览差异报告详情                                                |
+| "导入\<tid\>"    | 拉取帖子 + 下载图片 → .raw.mw + .mw                            |
+| "审阅\<文章名\>" | 交互式优化：Infobox、章节、注释、段落                           |
+| "更新\<tid\>"    | 增量更新已有 Wiki 文章                                          |
+| "/import-queue"  | 读取队列，并行分派 DeepSeek subagent 独立执行完整导入+审阅+定稿 |
+| "/ds\<任务\>"    | 显式派工给 DeepSeek subagent（绕过自动决策）                    |
 
 ### CLI 命令
 
@@ -209,20 +216,20 @@ git rebase refs/remotes/origin/master
 
 ## 格式转换规则
 
-| 论坛内容 | MediaWiki 输出 |
-|----------|---------------|
-| 作者正文 | 保留为正文 |
-| 作者章节（≥200 字） | `== 首行标题 ==` |
+| 论坛内容                            | MediaWiki 输出                                              |
+| ----------------------------------- | ----------------------------------------------------------- |
+| 作者正文                            | 保留为正文                                                  |
+| 作者章节（≥200 字）                | `== 首行标题 ==`                                          |
 | 作者回复读者（含 `<blockquote>`） | `{{同人注释start}}读者: 问题\n— 作者回复{{同人注释end}}` |
-| 作者短内容（<200 字） | `{{同人注释start}}...{{同人注释end}}` |
-| 其他用户回复 | `{{同人注释start}}...{{同人注释end}}` |
-| 附件图片 `<img file="...">` | `[[File:xxx.jpg\|600px]]` |
-| `<strong>text</strong>` | `'''text'''` |
-| `<a href="url">text</a>` | `[url text]` |
-| 「XXX 发表于 HH:MM」 | 自动删除 |
-| `&nbsp;` | 空格 |
-| 论坛内置表情 | 自动过滤 |
-| Infobox 日期 | 首楼日期 → 首次发布 / 最新作者章节日期 → 最近更新 |
+| 作者短内容（<200 字）               | `{{同人注释start}}...{{同人注释end}}`                     |
+| 其他用户回复                        | `{{同人注释start}}...{{同人注释end}}`                     |
+| 附件图片 `<img file="...">`       | `[[File:xxx.jpg\|600px]]`                                  |
+| `<strong>text</strong>`           | `'''text'''`                                              |
+| `<a href="url">text</a>`          | `[url text]`                                              |
+| 「XXX 发表于 HH:MM」                | 自动删除                                                    |
+| `&nbsp;`                          | 空格                                                        |
+| 论坛内置表情                        | 自动过滤                                                    |
+| Infobox 日期                        | 首楼日期 → 首次发布 / 最新作者章节日期 → 最近更新         |
 
 ## Playwright 安装说明
 
