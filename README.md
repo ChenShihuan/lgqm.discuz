@@ -19,7 +19,6 @@ lgqm.discuz/
 │   ├── pw_fetcher.py        # Playwright 浏览器管理 + Wiki 预览渲染
 │   ├── converter.py         # 格式转换（HTML → MediaWiki）+ 章节检测
 │   ├── index_list.py        # 同人作品列表维护
-│   ├── mw_push.py           # MediaWiki API 快速推送（绕过 git-remote-mediawiki）
 │   └── cli.py               # 命令行入口
 ├── webui/                   # WebUI 看板
 │   ├── server.py            # HTTP 服务器（静态文件 + API + 论坛代理）
@@ -205,7 +204,7 @@ git rebase refs/remotes/origin/master
 2. **导入**：Playwright 拉取帖子 + 下载图片 → 转换 Wiki 格式 → `.raw.mw`（原始）+ `.mw`（基础处理）
 3. **审阅**：补全 Infobox → 格式化章节标题 → 清理同人注释 → 段落格式化 → 对比差异
 4. **预览**：VS Code 内一键预览 / WebUI 在线渲染
-5. **提交**：复制 `.mw` 到 Wiki 仓库 → git commit 或 mw_push.py
+5. **提交**：复制 `.mw` 到 Wiki 仓库 → git commit
 6. **批量**：`/import-queue` → Claude 监工 → DeepSeek subagent 并行每篇完整流程
 
 ## 格式转换规则

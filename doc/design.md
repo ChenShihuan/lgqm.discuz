@@ -75,7 +75,7 @@ forum-39 (Discuz X3.4 + Cloudflare)
 └────────────────┘
      │
      ▼
-  复制 → huijiwiki 仓库 → git commit / mw_push.py
+  复制 → huijiwiki 仓库 → git commit
 ```
 
 ### 2.2 模块职责
@@ -94,7 +94,6 @@ forum-39 (Discuz X3.4 + Cloudflare)
 | 拉取 | `fetcher.py` | Playwright 驱动拉取帖子和图片，章节日期追踪 |
 | 转换 | `converter.py` | HTML→Wiki 标记，章节自动检测，Q&A 回复格式（读者: — 作者）|
 | 列表维护 | `index_list.py` | 同人作品列表追加/更新/序号校正/分卷识别 |
-| Wiki 推送 | `mw_push.py` | MediaWiki API 直接推送，绕过 git-remote-mediawiki |
 | CLI | `cli.py` | 命令行入口：import, update, review-info, webui, renumber-list 等 |
 | WebUI | `webui/` | HTTP 看板 + API（报告/队列/跳过/预览/扫描） |
 | 扩展 | `lgqm-wiki-helper/` | VS Code 扩展：状态栏面板按钮 + .mw 预览 |

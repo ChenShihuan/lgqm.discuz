@@ -28,3 +28,4 @@ data/local.json
 .vscode/
 .idea/
 data/cookies.pkl
+.coverage

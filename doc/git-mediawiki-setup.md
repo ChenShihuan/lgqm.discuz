@@ -129,7 +129,6 @@ git ls-remote origin
 
 ## 已知限制
 
-- **push 慢**：`git push` 会对每个变更页面逐一比对 API，页面多时很慢。替代方案：使用 `monitor/mw_push.py` 直接通过 API 推送，仅推送实际变更的文件
 - **大文件超时**：单个页面过大可能 504，建议控制在 2MB 以内
 - **需 WSL/Linux**：`git-remote-mediawiki` 依赖 Perl，Windows Git 不包含，需要自行安装。另外，灰机Wiki部分页面包含Windows文件系统禁止的符号，例如“ : ”等，在Windows下需要额外配置复杂的映射机制。
 

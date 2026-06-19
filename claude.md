@@ -31,7 +31,6 @@ lgqm.discuz/
 │   ├── pw_fetcher.py       # Playwright 浏览器单例 + Wiki wikitext→HTML 预览
 │   ├── converter.py        # 格式转换（HTML → MediaWiki）+ 章节自动检测 + Q&A 回复格式
 │   ├── index_list.py       # 同人作品列表维护（追加/更新/序号校正/分卷识别）
-│   ├── mw_push.py          # 直接通过 MediaWiki API 推送变更（绕过 git-remote-mediawiki）
 │   └── cli.py              # 命令行入口
 ├── webui/                  # WebUI 看板
 │   ├── server.py           # HTTP 服务器（静态文件 + API 路由 + 论坛代理）
@@ -176,7 +175,7 @@ lgqm.huijiwiki.com 仓库当中拉取更新，应当采用如下指令：
 git rebase refs/remotes/origin/master
 ```
 
-已启用 `remote.origin.shallow = true` 加速 fetch。git push 慢的问题可用 `monitor.mw_push.py` 绕过。
+已启用 `remote.origin.shallow = true` 加速 fetch。
 
 ## 工作流
 
@@ -189,7 +188,7 @@ git rebase refs/remotes/origin/master
 2. **导入**：Playwright 拉取帖子 + 下载图片 → 转换 Wiki 格式 → `.raw.mw`（原始）+ `.mw`（基础处理）
 3. **审阅**：补全 Infobox → 格式化章节标题 → 清理同人注释 → 段落格式化 → 对比差异
 4. **预览**：VS Code 内一键预览 / `preview.html` / `pw_parse_wikitext()` API
-5. **提交**：复制 `.mw` 到 Wiki 仓库 → git commit 或 mw_push.py
+5. **提交**：复制 `.mw` 到 Wiki 仓库 → git commit
 
 ### 批量导入（DeepSeek Subagent 并行派工）
 
