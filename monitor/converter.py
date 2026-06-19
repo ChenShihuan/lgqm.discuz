@@ -16,6 +16,24 @@ last_merged_titles = []
 _last_toc_info = {}
 
 
+def _insert_paragraph_breaks(text: str) -> str:
+    """
+    在相邻非空行之间插入空行，确保 MediaWiki 正确分段。
+
+    MediaWiki 将单 \n 视为空格，只有 \n\n（空行）才产生段落分隔。
+    论坛 HTML 转换后，相邻行之间通常只有一个 \n，需要补空行。
+    """
+    lines = text.split('\n')
+    result = []
+    for i, line in enumerate(lines):
+        stripped = line.rstrip()
+        result.append(stripped)
+        # 当前行非空 且 下一行非空 → 插入空行分隔
+        if i < len(lines) - 1 and stripped and lines[i + 1].rstrip():
+            result.append('')
+    return '\n'.join(result)
+
+
 def html_to_wiki(html: str) -> str:
     """
     将 HTML 内容转换为 MediaWiki 标记
@@ -125,6 +143,10 @@ def html_to_wiki(html: str) -> str:
 
     # 清理多余空白
     text = re.sub(r'\n{3,}', '\n\n', text)  # 最多连续两个换行
+
+    # 插入段落分隔：相邻非空行之间补空行，确保 MediaWiki 正确分段
+    text = _insert_paragraph_breaks(text)
+
     text = text.strip()
 
     # 强制替换旧域名为 lgqmonline.top
@@ -848,7 +870,9 @@ def save_wiki_file(content: str, filename: str, output_dir: str = None,
     filepath = os.path.join(output_dir, f"{safe_name}.mw")
 
     with open(filepath, 'w', encoding='utf-8') as f:
-        f.write(normalize_forum_domains(content))
+        # 确保文件以单个换行结尾，匹配 git-mediawiki 的 mediawiki_smudge 行为
+        text = normalize_forum_domains(content).rstrip('\n') + '\n'
+        f.write(text)
 
     log(f"Wiki 文件已保存: {filepath}", "SUCCESS")
     return filepath
@@ -965,5 +989,6 @@ def update_existing_wiki(existing_content: str, new_posts: List[Post],
         result += "\n\n" + "\n\n".join(new_parts)
     result += "\n" + tail.strip()
 
+    # 确保文件以单个换行结尾，匹配 git-mediawiki 的 mediawiki_smudge 行为
     # 强制替换旧域名为 lgqmonline.top
-    return normalize_forum_domains(result)
+    return normalize_forum_domains(result).rstrip('\n') + '\n'

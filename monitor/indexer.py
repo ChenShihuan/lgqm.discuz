@@ -164,15 +164,51 @@ def scan_wiki_articles(repo_path: str = None, verbose: bool = False) -> List[Wik
         fields = parse_infobox_fields(infobox_match.group(1))
 
         # 提取论坛链接
+        # 优先从主字段（官坛原帖）提取，再回退到备用字段（其他、其他网站）
+        # 早年编辑的文章有时将论坛链接放在 其他 / 其他网站 字段中
+        fallback_fields = ["其他", "其他网站"]
+
         forum_url = ""
         forum_tid = None
         forum_tids = []
+
+        def _collect_tids_from_field(field_val):
+            """从单个字段值中提取所有 TID"""
+            if not field_val:
+                return []
+            return extract_all_tids(field_val)
+
+        # 从主字段收集
         raw_url = fields.get(forum_link_field, "")
         all_urls = extract_all_forum_urls(raw_url)
+        forum_tids = extract_all_tids(raw_url)
+
+        # 从备用字段补充（仅在主字段无结果时搜索备用字段，
+        # 但始终合并备用字段中的 TID 以覆盖多帖同人的情况）
+        for fb_field in fallback_fields:
+            fb_val = fields.get(fb_field, "")
+            fb_tids = _collect_tids_from_field(fb_val)
+            for t in fb_tids:
+                if t not in forum_tids:
+                    forum_tids.append(t)
+
+        # 如果主字段无结果，从备用字段获取主 URL
+        if not all_urls:
+            for fb_field in fallback_fields:
+                fb_val = fields.get(fb_field, "")
+                all_urls = extract_all_forum_urls(fb_val)
+                if all_urls:
+                    # 也补充主字段缺失的 TID
+                    fb_tids = extract_all_tids(fb_val)
+                    for t in fb_tids:
+                        if t not in forum_tids:
+                            forum_tids.append(t)
+                    break
+
+        if forum_tids:
+            forum_tid = forum_tids[0]
         if all_urls:
             forum_url = all_urls[0]
-            forum_tid = extract_tid(forum_url)
-            forum_tids = extract_all_tids(raw_url)
 
         # 提取标题（去掉 .mw 后缀）
         title = filename[:-3]

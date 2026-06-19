@@ -381,6 +381,8 @@ def _update_mw_references(base_dir: str, rename_map: Dict[str, str],
             updated_files += 1
             filename = os.path.basename(mw_path)
             if not dry_run:
+                # 确保文件以单个换行结尾（与 save_wiki_file 一致）
+                new_content = new_content.rstrip('\n') + '\n'
                 with open(mw_path, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 log(f"  📝 {filename}: 已更新图片引用", "INFO")

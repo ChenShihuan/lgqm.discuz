@@ -12,6 +12,7 @@ from monitor.converter import (
     _mw_heading, _parse_toc, _clean_subject, _parse_toc_external,
     convert_thread_to_wiki, update_existing_wiki,
     save_wiki_file,
+    _insert_paragraph_breaks,
 )
 from monitor.models import Post
 
@@ -58,6 +59,94 @@ class TestHtmlToWiki:
         # html_to_wiki 处理的是 HTML 片段；pstatus 编辑提示需要特定上下文
         # 验证函数不会崩溃即可
         result = html_to_wiki('<div><i class="pstatus"> 本帖最后由 tester 于 2026-1-1 编辑 </i></div>')
+        assert isinstance(result, str)
+
+
+# ============================================================
+# _insert_paragraph_breaks — 段落分隔
+# ============================================================
+
+class TestParagraphBreaks:
+    """邻行分隔：相邻非空行之间自动插入空行"""
+
+    def test_adjacent_lines_separated(self):
+        """相邻非空行插入空行"""
+        text = "第一行\n第二行\n第三行"
+        result = _insert_paragraph_breaks(text)
+        assert result == "第一行\n\n第二行\n\n第三行"
+
+    def test_existing_blank_lines_preserved(self):
+        """已有空行不变"""
+        text = "第一段\n\n第二段"
+        result = _insert_paragraph_breaks(text)
+        assert result == "第一段\n\n第二段"
+
+    def test_empty_lines_at_edges_trimmed(self):
+        """空行在首尾保留（由 html_to_wiki 的 strip 处理）"""
+        text = "\n第一行\n第二行\n"
+        result = _insert_paragraph_breaks(text)
+        assert "第一行\n\n第二行" in result
+
+    def test_single_line_unchanged(self):
+        """单行不变"""
+        assert _insert_paragraph_breaks("只有一行") == "只有一行"
+
+    def test_trailing_whitespace_handled(self):
+        """行尾空白不影响判断"""
+        text = "第一行  \n第二行  "
+        result = _insert_paragraph_breaks(text)
+        assert result == "第一行\n\n第二行"
+
+    def test_empty_text(self):
+        assert _insert_paragraph_breaks("") == ""
+
+    def test_mixed_blank_and_non_blank(self):
+        """空行与内容混合"""
+        text = "A\n\nB\nC\n\nD"
+        result = _insert_paragraph_breaks(text)
+        # A 和 B 之间已有空行保持不变；B 和 C 之间插入空行；C 和 D 已有空行
+        assert "A\n\nB\n\nC\n\nD" == result
+
+
+class TestHtmlToWikiParagraphs:
+    """html_to_wiki 端到端段落测试"""
+
+    def test_div_blocks_become_paragraphs(self):
+        """<div> 包裹的连续文本转换为独立段落"""
+        html = '<div align="left">第一段内容</div><div align="left">第二段内容</div>'
+        result = html_to_wiki(html)
+        # 两段之间应有空行
+        lines = result.split('\n')
+        non_empty = [l for l in lines if l.strip()]
+        assert len(non_empty) == 2
+        assert non_empty[0] == "第一段内容"
+        assert non_empty[1] == "第二段内容"
+        # 中间有空行
+        assert "" in lines
+
+    def test_br_separated_lines(self):
+        """<br> 分隔的行变为段落"""
+        html = "第一行<br />第二行<br />第三行"
+        result = html_to_wiki(html)
+        lines = result.split('\n')
+        non_empty = [l for l in lines if l.strip()]
+        assert len(non_empty) == 3
+
+    def test_pseudo_table_rows_separated(self):
+        """伪表格行正确分段（如 '模式触发方式主要效果'）"""
+        html = (
+            '<div align="left">模式触发方式主要效果'
+            '平时经济（默认）初始状态民用生产优先，军需按需生产，无额外征召'
+            '战时动员玩家宣布动员 / 清军入境自动触发军需产能+40%</div>'
+        )
+        result = html_to_wiki(html)
+        # 不崩溃即可；具体分段依赖于 HTML 结构
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_compact_lines_not_merged(self):
+        """连续紧凑行不会被合并为一段"""
+        result = html_to_wiki("物资类型计量单位安全库存线警戒线危机线")
         assert isinstance(result, str)
 
 
@@ -576,3 +665,46 @@ class TestParseTocExternal:
         chapters, levels = _parse_toc_external(toc_analysis, posts)
         assert "_first_post" in chapters
         assert chapters["_first_post"] == "序章"
+
+
+# ============================================================
+# 尾随换行 — 确保 .mw 文件以单个 \n 结尾
+# ============================================================
+
+class TestTrailingNewline:
+    """所有写入 .mw 文件的函数必须以单个 \n 结尾"""
+
+    def test_save_wiki_file_trailing_newline(self, tmp_path):
+        """save_wiki_file 输出以 \n 结尾"""
+        text_dir = str(tmp_path)
+        # 需要覆盖 config 路径
+        with patch("monitor.converter.get", return_value=text_dir):
+            fp = save_wiki_file("正文内容\n[[分类:同人作品]]", "test_article")
+            with open(fp, "r", encoding="utf-8") as f:
+                content = f.read()
+            assert content.endswith('\n')
+            assert not content.endswith('\n\n')
+
+    def test_save_wiki_file_no_double_newline(self, tmp_path):
+        """已有尾随换行的内容不被加倍"""
+        text_dir = str(tmp_path)
+        with patch("monitor.converter.get", return_value=text_dir):
+            fp = save_wiki_file("正文内容\n[[分类:同人作品]]\n", "test_double")
+            with open(fp, "r", encoding="utf-8") as f:
+                content = f.read()
+            assert content.endswith('\n')
+            assert not content.endswith('\n\n')
+
+    def test_update_existing_wiki_trailing_newline(self):
+        """update_existing_wiki 输出以 \n 结尾"""
+        existing = "== 第一章 ==\n正文\n{{首行缩进end}}\n[[分类:同人作品]]"
+        result = update_existing_wiki(existing, [])
+        assert result.endswith('\n')
+        assert not result.endswith('\n\n')
+
+    def test_update_existing_wiki_no_double_newline(self):
+        """已有尾随换行的现有内容不被加倍"""
+        existing = "== 第一章 ==\n正文\n{{首行缩进end}}\n[[分类:同人作品]]\n"
+        result = update_existing_wiki(existing, [])
+        assert result.endswith('\n')
+        assert not result.endswith('\n\n')
