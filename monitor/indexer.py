@@ -12,12 +12,36 @@ from .models import WikiArticle
 from .utils import log, extract_tid, set_verbose
 
 
-# Infobox 模板提取：从 {{Infobox TongRen 到 \n}}（模板闭合）
+# Infobox 模板提取：从 {{Infobox TongRen 开始，用大括号计数找到匹配的 }}
 # 注意：部分文件有 {{Infobox TongRen <!-- comment --> 格式
-INFOBOX_PATTERN = re.compile(
-    r'\{\{Infobox TongRen([\s\S]*?)\n\}\}',
-    re.DOTALL
-)
+# 部分文件的 }} 不在独立行（如 |官方论坛= 布丁之主}}），不能用 \n\}\} 匹配
+INFOBOX_START = '{{Infobox TongRen'
+
+
+def _extract_infobox(content: str) -> str:
+    """用大括号计数提取 Infobox 模板内容
+
+    避免正则无法匹配同行闭合，也避免误匹配内部模板。
+    """
+    start_idx = content.find(INFOBOX_START)
+    if start_idx == -1:
+        return ""
+    # 从 {{ 开始计数
+    depth = 0
+    i = start_idx
+    while i < len(content) - 1:
+        if content[i:i+2] == '{{':
+            depth += 1
+            i += 2
+            continue
+        if content[i:i+2] == '}}':
+            depth -= 1
+            if depth == 0:
+                return content[start_idx:i+2]
+            i += 2
+            continue
+        i += 1
+    return ""
 
 # 单字段提取：| 字段名 = 值（跨行兼容：值可能为空或在后续行）
 FIELD_PATTERN = re.compile(r'\|\s*(.+?)\s*=\s*(.*)')
@@ -155,13 +179,15 @@ def scan_wiki_articles(repo_path: str = None, verbose: bool = False) -> List[Wik
             log(f"读取失败 {filename}: {e}", "WARN")
             continue
 
-        # 提取 Infobox
-        infobox_match = INFOBOX_PATTERN.search(content)
-        if not infobox_match:
+        # 提取 Infobox（用大括号计数法，兼容同行 }} 和内部 {{PAGENAME}}）
+        infobox_text = _extract_infobox(content)
+        if not infobox_text:
             # 没有 Infobox 的文章（如年表等）
             continue
 
-        fields = parse_infobox_fields(infobox_match.group(1))
+        # 去掉外层的 {{Infobox TongRen 和 }}
+        inner = infobox_text[len(INFOBOX_START):-2]
+        fields = parse_infobox_fields(inner)
 
         # 提取论坛链接
         # 优先从主字段（官坛原帖）提取，再回退到备用字段（其他、其他网站）

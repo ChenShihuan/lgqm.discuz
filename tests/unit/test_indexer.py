@@ -1,6 +1,6 @@
-"""单元测试: monitor/indexer.py — Infobox 解析, URL/TID 提取
+"""单元测试: monitor/indexer.py — Infobox 解析, URL/TID 提取, 大括号计数提取
 
-覆盖 REG-034~037, REG-041~042
+覆盖 REG-034~037, REG-041~042, REG-068
 """
 
 import pytest
@@ -9,6 +9,7 @@ from monitor.indexer import (
     extract_all_forum_urls,
     extract_all_tids,
     build_tid_index,
+    _extract_infobox,
 )
 from monitor.models import WikiArticle
 
@@ -129,6 +130,130 @@ class TestBuildTidIndex:
         assert 1 in idx and 2 in idx and 3 in idx
         assert idx[1].title == "A"
         assert idx[2].title == "B"
+
+
+# ============================================================
+# _extract_infobox — 大括号计数法提取 Infobox  (REG-068)
+# ============================================================
+
+class TestExtractInfobox:
+    """用大括号计数法提取 {{Infobox TongRen ... }} 模板
+
+    修复正则 \n}} 无法匹配同行闭合（如 |字段=值}}）的问题，
+    同时正确处理内部 {{PAGENAME}} 等嵌套模板。
+    """
+
+    def test_standard_closing_on_own_line(self):
+        """}} 独占一行 — 传统格式"""
+        text = (
+            "{{同人作品版权声明}}\n"
+            "{{Infobox TongRen\n"
+            "| 同人作品 = 测试\n"
+            "| 地点 = 临高\n"
+            "}}\n"
+            "正文内容..."
+        )
+        result = _extract_infobox(text)
+        assert result is not None
+        assert result.startswith("{{Infobox TongRen")
+        assert result.endswith("}}")
+        assert "| 同人作品 = 测试" in result
+        assert "正文内容" not in result
+
+    def test_same_line_closing(self):
+        """REG-068: }} 与最后一个字段同行 — 如 |官方论坛= 布丁之主}}"""
+        text = (
+            "{{同人作品版权声明}}\n"
+            "{{Infobox TongRen\n"
+            "| 同人作品 = 测试\n"
+            "| 官方论坛 = 布丁之主}}\n"
+            "正文内容..."
+        )
+        result = _extract_infobox(text)
+        assert result is not None
+        assert result.startswith("{{Infobox TongRen")
+        assert result.endswith("}}")
+        assert "布丁之主" in result
+        assert "正文内容" not in result
+
+    def test_nested_templates(self):
+        """内部含 {{PAGENAME}}, {{字数统计}} 等嵌套模板"""
+        text = (
+            "{{Infobox TongRen\n"
+            "| 同人作品 = {{PAGENAME}}\n"
+            "| 字数统计 = {{字数统计}}\n"
+            "}}\n"
+            "正文..."
+        )
+        result = _extract_infobox(text)
+        assert result is not None
+        assert "{{PAGENAME}}" in result
+        assert "{{字数统计}}" in result
+        assert "正文" not in result
+
+    def test_comment_after_infobox_name(self):
+        """Infobox TongRen 后跟注释"""
+        text = (
+            "{{Infobox TongRen <!-- 按照这么写 -->\n"
+            "| 同人作品 = 测试\n"
+            "}}\n"
+        )
+        result = _extract_infobox(text)
+        assert result is not None
+        assert "Infobox TongRen" in result
+        assert "| 同人作品 = 测试" in result
+
+    def test_no_infobox(self):
+        """没有 Infobox 的文章"""
+        text = "这是普通正文内容\n没有模板\n"
+        result = _extract_infobox(text)
+        assert result == ""
+
+    def test_deeply_nested_braces(self):
+        """多层嵌套: Infobox 内含链接和模板"""
+        text = (
+            "{{Infobox TongRen\n"
+            "| 同人作品 = 示例\n"
+            "| 官坛原帖 = [https://lgqmonline.top/thread-3550-1-1.html 链接]\n"
+            "| 字数统计 = {{字数统计}}\n"
+            "| 图像 = [[Image:test.jpg|class=img-responsive]]\n"
+            "}}\n"
+        )
+        result = _extract_infobox(text)
+        assert result is not None
+        assert "thread-3550" in result
+        assert "{{字数统计}}" in result
+        assert "[[Image:test.jpg" in result
+
+    def test_real_file_format(self):
+        """模拟真实文件: 澳宋元老院办公厅女仆测评综合标准（1630版）.mw"""
+        text = (
+            "{{同人作品版权声明}}\n"
+            "{{Infobox TongRen <!-- 按照这么写，就能得出右边的结果  -->\n"
+            "| 同人作品       = {{PAGENAME}}\n"
+            "| 图像	=\n"
+            "| 图像信息    = \n"
+            "| 百度贴吧    = \n"
+            "| 官方论坛    = 布丁之主\n"
+            "| 官坛原帖    = [https://lgqmonline.top/thread-3550-1-1.html 帖]\n"
+            "| 其他网站    =\n"
+            "| 其他      = \n"
+            "| 首次发布  = 2019-11-27\n"
+            "| 最近更新  = 2019-11-27\n"
+            "| 地点        = 临高\n"
+            "| 完结情况    = 完结\n"
+            "| 字数统计    =  {{字数统计}}\n"
+            "|官方论坛= 布丁之主}}\n"
+            "正文..."
+        )
+        result = _extract_infobox(text)
+        assert result is not None
+        assert "thread-3550" in result
+        assert "{{PAGENAME}}" in result
+        assert "{{字数统计}}" in result
+        assert "2019-11-27" in result
+        # 不能包含正文
+        assert "正文" not in result
 
 
 # ============================================================
