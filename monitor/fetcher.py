@@ -245,6 +245,7 @@ def _fetch_thread_archiver(tid: int, verbose: bool = False) -> List[Post]:
             content_html=data["content_html"],
             floor=data["floor"],
             is_first_post=data["is_first_post"],
+            subject=data.get("subject", ""),
         ))
     return posts
 
@@ -324,6 +325,14 @@ def _fetch_thread_regular(tid: int, verbose: bool = False, max_floors: int = Non
                 if content_elem:
                     content_html = etree.tostring(content_elem[0], encoding="unicode")
 
+            # 提取楼层标题（Discuz 回复帖的「标题」字段 → <h2>）
+            subject = ""
+            h2_elem = table.xpath('.//h2')
+            if h2_elem:
+                subject = h2_elem[0].xpath("string()").strip()
+                # 标题可能还包含「本帖最后由」的编辑信息，清理
+                subject = re.sub(r'本帖最后由.*$', '', subject).strip()
+
             if author or content_html:
                 all_posts_data.append({
                     "author": author,
@@ -332,6 +341,7 @@ def _fetch_thread_regular(tid: int, verbose: bool = False, max_floors: int = Non
                     "floor": len(all_posts_data) + 1,
                     "is_first_post": len(all_posts_data) == 0,
                     "pid": pid,
+                    "subject": subject,
                 })
 
         if verbose:
@@ -357,6 +367,7 @@ def _fetch_thread_regular(tid: int, verbose: bool = False, max_floors: int = Non
             floor=data["floor"],
             is_first_post=data["is_first_post"],
             pid=data.get("pid", ""),
+            subject=data.get("subject", ""),
         ))
     return posts
 

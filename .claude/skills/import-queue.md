@@ -116,6 +116,11 @@ print(f'作品列表已{action}: #{seq} [[{name}]]')
 - 如果某步骤失败，在 errors 数组中记录具体原因，继续执行后续可做的步骤
 - 所有文件路径使用相对路径（从项目根目录 /mnt/e/code/lgqm.discuz 出发）
 - 第一步必须先 Read 两个技能文件，否则你不知道完整的规则
+- **所有产出物必须输出到 DIR（即 output/{tid}-{name}/）子目录下，禁止在项目根目录创建任何文件：**
+  - 报告文件 → `DIR/report.json`（不是根目录的 report_{tid}.json）
+  - 临时脚本 → `DIR/fix_xxx.py`（不是根目录的 fix_xxx.py）
+  - TOC 分析 → `DIR/toc_analysis.json`（不是根目录）
+  - 任何其他临时/中间产物 → 一律放在 DIR 下
 ```
 
 #### Context 参数（所有条目相同）：
@@ -132,6 +137,7 @@ print(f'作品列表已{action}: #{seq} [[{name}]]')
 - 论坛凭据: data/local.json，Cookie: data/cookies.pkl
 - Infobox | 字数 = 由 python3 -m monitor.cli word-count 自动计算并写入
 - 格式转换规则见 CLAUDE.md 中的"格式转换规则"表格
+- **文件输出分层约定：所有产物（报告、临时脚本、中间文件）必须输出到 `output/{tid}-{name}/` 子目录，禁止在项目根目录（/mnt/e/code/lgqm.discuz/）创建文件**
 
 ## 关键文件位置
 - import-article 技能: .claude/skills/import-article.md

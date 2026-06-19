@@ -39,6 +39,7 @@ class Post:
     floor: int = 0              # 楼层号
     is_first_post: bool = False  # 是否首楼
     pid: str = ""               # Discuz 帖子 ID（如 pid532556904）
+    subject: str = ""           # 楼层标题（Discuz 回复帖的「标题」字段，<h2> 内容）
 
 
 @dataclass

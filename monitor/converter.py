@@ -397,6 +397,40 @@ def _is_chapter_start(first_line: str) -> bool:
     return False
 
 
+def _clean_subject(subject: str) -> str:
+    """
+    清理楼层标题（Discuz <h2> subject），提取纯章节名。
+
+    输入示例：
+      "1～无边绝望的降临"           → "无边绝望的降临"
+      "2    刻骨铭心的最初相遇"     → "刻骨铭心的最初相遇"
+      "2.甜腻时光"                  → "甜腻时光"
+      "3罗曼蒂克的生日之夜"         → "罗曼蒂克的生日之夜"
+      "复更后文，...《蝶舞莺啼》"   → "蝶舞莺啼"
+      "25      姐姐"                → "姐姐"
+      "5  山无棱，天地合"           → "山无棱，天地合"
+    """
+    import re as _re
+    s = subject.strip()
+
+    # 1. 提取《》中的标题（优先级最高）
+    book_match = _re.search(r'《(.+?)》', s)
+    if book_match:
+        return book_match.group(1).strip()
+
+    # 2. 去掉开头的数字编号（含可选分隔符: . 、 ～ ~ 空格）
+    #    如 "1～xxx" "2.xxx" "3 xxx" "25      姐姐"
+    s = _re.sub(r'^\d+\s*[.、～~]?\s*', '', s)
+
+    # 3. 去掉末尾句号（非章节名一部分）
+    s = _re.sub(r'[。.！!]+$', '', s)
+
+    # 4. 去掉开头的"复更后文"等非章节前缀
+    s = _re.sub(r'^复更后文[，,]\s*[^《]+[。.]?\s*', '', s)
+
+    return s.strip()
+
+
 def _mw_heading(title: str, level: int = 2) -> str:
     """构建 MediaWiki 标题，level 1→=, 2→==, 3→==="""
     markers = "=" * max(1, min(3, level))
@@ -662,6 +696,21 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
             wiki_text = convert_post(post, config)
             if not wiki_text:
                 continue
+
+            # 🆕 优先使用楼层标题（Discuz <h2> subject）作为章节标题
+            if post.subject and post.subject.strip():
+                clean_subj = _clean_subject(post.subject)
+                if clean_subj and len(clean_subj) >= 2:
+                    # 确定层级：默认 level 2，TOC 中有映射时使用 TOC 层级
+                    numeric_pid = post.pid.replace("pid", "") if post.pid else ""
+                    toc_name = toc_chapters.get(numeric_pid, "")
+                    level = toc_levels.get(numeric_pid, 2) if toc_name else 2
+                    current_toc_level = level
+                    wiki_text = _mw_heading(clean_subj, level) + f"\n\n{wiki_text}"
+                    last_was_author_chapter = True
+                    parts.append(wiki_text)
+                    continue
+
             if len(wiki_text) >= 200:
                 lines = wiki_text.split('\n', 1)
                 first_line = lines[0].strip()
@@ -683,7 +732,7 @@ def convert_thread_to_wiki(posts: List[Post], metadata: dict = None,
                         current_toc_level = level
                         wiki_text = _mw_heading(toc_name, level) + f"\n\n{rest}"
                     else:
-                        inferred = min(current_toc_level + 1, 3) if current_toc_level > 0 else 2
+                        inferred = current_toc_level if current_toc_level > 0 else 2
                         wiki_text = _mw_heading(first_line, inferred) + f"\n\n{rest}"
                     last_was_author_chapter = True
                 elif last_was_author_chapter and parts:

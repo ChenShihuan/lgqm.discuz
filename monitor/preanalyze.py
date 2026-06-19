@@ -24,8 +24,9 @@ def format_posts_for_analysis(posts, max_floors: int = 10) -> str:
     for post in posts[:max_floors]:
         lines.append("=" * 60)
         marker = ">>> 首楼 (OP) <<<" if post.is_first_post else ""
+        subject_info = f' 标题: "{post.subject}"' if post.subject else ""
         lines.append(
-            f"第 {post.floor} 楼 | 作者: {post.author} | PID: {post.pid} {marker}"
+            f"第 {post.floor} 楼 | 作者: {post.author} | PID: {post.pid}{subject_info} {marker}"
         )
         lines.append("=" * 60)
 
