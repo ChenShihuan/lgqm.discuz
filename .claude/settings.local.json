@@ -6,7 +6,9 @@
       "Bash(claude plugin *)",
       "Read(//c/Users/cnchensh/.claude/**)",
       "Read(//c/Users/cnchensh/.claude/plugins/**)",
-      "Bash(python3 -m monitor.cli scan --full)"
+      "Bash(python3 -m monitor.cli scan --full)",
+      "mcp__deepseek__delegate_to_deepseek",
+      "mcp__deepseek__ping"
     ]
   }
 }

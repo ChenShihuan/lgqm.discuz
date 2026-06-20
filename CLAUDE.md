@@ -61,6 +61,7 @@ import-queue (Claude 监工)
 ```
 
 > 审阅优化是纯文件编辑，无网络依赖，DeepSeek subagent 可并行无冲突处理。
+> subagent必须调用 **deepseek-v4-flash[1m]** 模型进行审阅
 > 审阅过程必须按照**review-article** skill进行
 
 
@@ -95,7 +96,7 @@ import-queue (Claude 监工)
 其余详细规则见 @.claude/skills/review-article.md
 
 ## skill工作规则
-- 编辑过程中使用的临时脚本或者临时文件**必须放置在 output/TID-<NAME> 的指定目录下**
+- 编辑过程中使用的python临时脚本或其他临时文件**必须放置在 output/TID-<NAME> 的指定目录下**
 
 ## License
 

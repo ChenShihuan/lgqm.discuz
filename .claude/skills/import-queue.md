@@ -1,7 +1,7 @@
 ---
 name: import-queue
 description: 批量导入队列，每篇文章分派 DeepSeek subagent 独立执行完整导入+审阅+定稿
-model: haiku
+model: haiku deepseek-v4-flash[1m]
 ---
 
 读取 `data/import_queue.json` 中的导入队列，每篇文章分派一个 DeepSeek subagent 并行执行完整流程。

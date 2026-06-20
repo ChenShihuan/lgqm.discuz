@@ -1,7 +1,7 @@
 ---
 name: review-article
 description: 审阅导入的原始 .raw.mw 文件，优化后生成最终 .mw 文件，对比差异
-model: haiku
+model: haiku deepseek-v4-flash[1m]
 ---
 
 # Review Article — 审阅优化同人文章

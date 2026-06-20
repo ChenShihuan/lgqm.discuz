@@ -475,7 +475,7 @@ cd deepseek-as-subagent
 {
   "api_key": "sk-...",
   "model": "deepseek-v4-flash",
-  "max_turns": 50,
+  "max_turns": 500,
   "allowed_tools": ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "NotebookEdit"]
 }
 ```
