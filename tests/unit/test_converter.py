@@ -42,6 +42,90 @@ class TestHtmlToWiki:
         result = html_to_wiki("text&nbsp;text")
         assert "\xa0" not in result
 
+    # ——— 行首空白清理 (2026-06-21 fix) ———
+
+    def test_leading_nbsp_indentation_stripped(self):
+        """论坛 &nbsp; 缩进 → 行首空格被清除"""
+        html = '<div align="left">&nbsp;&nbsp;&nbsp;&nbsp;这是正文第一段。</div>'
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert len(lines) == 1
+        assert lines[0] == "这是正文第一段。"
+
+    def test_leading_fullwidth_spaces_stripped(self):
+        """全角空格（U+3000）缩进被清除"""
+        html = '<div align="left">　　这是渤海一年当中的头一次渔汛。</div>'
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert lines[0] == "这是渤海一年当中的头一次渔汛。"
+
+    def test_leading_xa0_stripped(self):
+        """直接 \\xa0 字节行首空白被清除"""
+        html = '<div align="left">\xa0\xa0\xa0\xa0饶是如此，这些汉子也很少有过怨言。</div>'
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert lines[0] == "饶是如此，这些汉子也很少有过怨言。"
+
+    def test_mixed_whitespace_indentation_stripped(self):
+        """混合空白（全角+半角+\\xa0）缩进被清除"""
+        html = '<div align="left">　 \xa0"加把劲儿嘿～嘿——"</div>'
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert lines[0].startswith('"加把')
+
+    def test_mid_text_nbsp_preserved_as_space(self):
+        """文中 &nbsp; 转为普通空格（不做多余清理）"""
+        result = html_to_wiki("text&nbsp;text&nbsp;text")
+        assert "text text text" in result
+
+    def test_trailing_whitespace_stripped(self):
+        """行尾空白不影响内容"""
+        html = '<div align="left">正文内容  </div>'
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert lines[0] == "正文内容"
+
+    def test_multiline_paragraphs_leading_ws_stripped(self):
+        """多段落每行行首空白均被清除"""
+        html = (
+            '<div align="left">　　早春。</div>'
+            '<div align="left">&nbsp;&nbsp;&nbsp;&nbsp;这是渤海一年当中的头一次渔汛。</div>'
+            '<div align="left">\xa0\xa0"嘿——哈！"</div>'
+        )
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert lines[0] == "早春。"
+        assert lines[1] == "这是渤海一年当中的头一次渔汛。"
+        assert lines[2].startswith('"嘿')
+
+    def test_empty_line_not_created_by_whitespace_only(self):
+        """纯空白行不产生空段落"""
+        html = '<div align="left">&nbsp;&nbsp;&nbsp;&nbsp;</div>'
+        result = html_to_wiki(html)
+        # 不应该有空内容的段落
+        assert result.strip() == ""
+
+    def test_forum_paragraph_real_world(self):
+        """真实论坛场景：&nbsp; 缩进 + 全角空格 + 对话引号"""
+        html = (
+            '<div align="left">&nbsp;&nbsp;&nbsp;&nbsp;早春。</div>'
+            '<div align="left">&nbsp;&nbsp;&nbsp;&nbsp;'
+            '这是渤海一年当中的头一次渔汛。直隶，登莱和辽东的渔民们，'
+            '往往这时候便驾着小船穿梭于烟波之中。</div>'
+            '<div align="left">&nbsp;&nbsp;"嘿\xe2\x80\x94\xe2\x80\x94哈！"</div>'
+            '<div align="left">&nbsp;&nbsp;&nbsp;&nbsp;'
+            '饶是如此，这些肤色黝黑的汉子也很少对生活有过什么怨言。</div>'
+        )
+        result = html_to_wiki(html)
+        lines = [l for l in result.split('\n') if l.strip()]
+        assert lines[0] == "早春。"
+        assert "头一次渔汛" in lines[1]
+        assert lines[2].startswith('"嘿')
+        assert lines[3] == "饶是如此，这些肤色黝黑的汉子也很少对生活有过什么怨言。"
+        # 确保没有任何行以空白开头
+        for line in lines:
+            assert not line[0].isspace(), f"Leading whitespace in: {line[:40]}"
+
     def test_br_to_newline(self):
         result = html_to_wiki("line1<br />line2")
         assert "line1" in result
