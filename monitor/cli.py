@@ -270,9 +270,9 @@ def _sanitize_filename(name: str) -> str:
 
 def _apply_rename_map_to_mw_files(rename_map: dict, text_dir: str):
     """
-    更新 .mw 文件中重命名图片的 [[File:...]] 引用。
+    更新 .mw 文件中重命名图片的 [[Image:...]] 引用。
 
-    仅在 [[File:xxx|...]] wikitext 标签内替换，避免误伤正文中的普通文本。
+    仅在 [[Image:xxx|...]] wikitext 标签内替换，避免误伤正文中的普通文本。
 
     Args:
         rename_map: {old_filename: new_filename}
@@ -293,11 +293,11 @@ def _apply_rename_map_to_mw_files(rename_map: dict, text_dir: str):
         for old_name, new_name in rename_map.items():
             if old_name not in new_content:
                 continue
-            # 仅在 [[File:xxx|...]] 或 [[File:xxx]] 中替换
+            # 仅在 [[Image:xxx|...]] 或 [[Image:xxx]] 中替换
             pattern = _re.compile(
-                rf'\[\[File:{_re.escape(old_name)}(\||\])'
+                rf'\[\[Image:{_re.escape(old_name)}(\||\])'
             )
-            replacement = f'[[File:{new_name}\\1'
+            replacement = f'[[Image:{new_name}\\1'
             new_text = pattern.sub(replacement, new_content)
             if new_text != new_content:
                 changed = True

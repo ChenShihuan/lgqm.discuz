@@ -366,12 +366,12 @@ def _update_mw_references(base_dir: str, rename_map: Dict[str, str],
         for old_name, new_name in rename_map.items():
             if old_name not in new_content:
                 continue
-            # 仅在 [[File:xxx|...]] 或 [[File:xxx]] wikitext 引用中替换
+            # 仅在 [[Image:xxx|...]] 或 [[Image:xxx]] wikitext 引用中替换
             # 使用正则避免误伤正文中的普通文本子串
             pattern = re.compile(
-                rf'\[\[File:{re.escape(old_name)}(\||\])'
+                rf'\[\[Image:{re.escape(old_name)}(\||\])'
             )
-            replacement = f'[[File:{new_name}\\1'
+            replacement = f'[[Image:{new_name}\\1'
             new_text = pattern.sub(replacement, new_content)
             if new_text != new_content:
                 changed = True

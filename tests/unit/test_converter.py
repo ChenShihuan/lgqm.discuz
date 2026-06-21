@@ -32,11 +32,11 @@ class TestHtmlToWiki:
 
     def test_image_file_conversion(self):
         result = html_to_wiki('<img file="abc/photo.jpg">')
-        assert "[[File:photo.jpg|600px]]" in result
+        assert "[[Image:photo.jpg|600px]]" in result
 
     def test_image_file_with_path(self):
         result = html_to_wiki('<img file="attachments/month_2201/icon.png">')
-        assert "[[File:icon.png|600px]]" in result
+        assert "[[Image:icon.png|600px]]" in result
 
     def test_nbsp_to_space(self):
         result = html_to_wiki("text&nbsp;text")

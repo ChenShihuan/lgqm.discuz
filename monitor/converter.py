@@ -84,7 +84,7 @@ def html_to_wiki(html: str) -> str:
 
     # 图片处理（在其他标签被删除之前）
     # Discuz 附件图片：<img file="data/attachment/.../xxx.jpg" zoomfile="...">
-    # 转换为 MediaWiki: [[File:xxx.jpg|600px]]
+    # 转换为 MediaWiki: [[Image:xxx.jpg|600px]]
     def _img_replace(m):
         # 优先取 file 属性，其次 zoomfile，其次 src
         for g in m.groups():
@@ -97,7 +97,7 @@ def html_to_wiki(html: str) -> str:
         filename_match = re.search(r'([^/]+\.(?:gif|jpg|jpeg|png|svg))', src, re.IGNORECASE)
         if filename_match:
             filename = filename_match.group(1)
-            return f'\n[[File:{filename}|600px]]\n'
+            return f'\n[[Image:{filename}|600px]]\n'
         return ''
     # <img file="...">  (Discuz 附件图片，含缩略信息)
     text = re.sub(
