@@ -15,17 +15,22 @@ from .utils import log, extract_tid, set_verbose
 # Infobox 模板提取：从 {{Infobox TongRen 开始，用大括号计数找到匹配的 }}
 # 注意：部分文件有 {{Infobox TongRen <!-- comment --> 格式
 # 部分文件的 }} 不在独立行（如 |官方论坛= 布丁之主}}），不能用 \n\}\} 匹配
+# 还有少数文件使用 {{InfoboxTongRen}}（无空格，历史遗留）
 INFOBOX_START = '{{Infobox TongRen'
+INFOBOX_START_NOSPACE = '{{InfoboxTongRen'
 
 
 def _extract_infobox(content: str) -> str:
     """用大括号计数提取 Infobox 模板内容
 
     避免正则无法匹配同行闭合，也避免误匹配内部模板。
+    同时支持 {{Infobox TongRen 和 {{InfoboxTongRen 两种格式。
     """
     start_idx = content.find(INFOBOX_START)
     if start_idx == -1:
-        return ""
+        start_idx = content.find(INFOBOX_START_NOSPACE)
+        if start_idx == -1:
+            return ""
     # 从 {{ 开始计数
     depth = 0
     i = start_idx

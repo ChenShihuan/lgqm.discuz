@@ -141,6 +141,13 @@ def html_to_wiki(html: str) -> str:
     # 清理「本帖最后由 XXX 于 YYYY-MM-DD HH:MM 编辑」
     text = re.sub(r'本帖最后由 [^\s]+ 于 \d{4}-\d{1,2}-\d{1,2} \d{2}:\d{2} 编辑\s*', '', text)
 
+    # 清理行首空白：MediaWiki 用 {{首行缩进start}} 模板处理缩进，
+    # 行首空格（全角/半角/\xa0）无意义且会破坏渲染
+    text = text.replace('\xa0', ' ')           # 非断行空格（与 &nbsp; 同义，直接字节形式）
+    text = text.replace('　', ' ')         # 全角空格（中文排版常用）
+    # 逐行去除行首空白
+    text = '\n'.join(line.lstrip() for line in text.split('\n'))
+
     # 清理多余空白
     text = re.sub(r'\n{3,}', '\n\n', text)  # 最多连续两个换行
 
